@@ -1,0 +1,19 @@
+## Interface: 11200
+## Title: TurtleHonorSpyEnhanced
+## Notes: Enhanced PvP standings tracker for Turtle WoW (fork of HonorSpy)
+## Author: Citrin (Tel'Abim)
+## X-Credits: Original by kakysha. Contributors: Mistaboom, Moxie, syli
+## OptionalDeps: Ace2
+## Version: 1.1.0
+## X-Category: Battlegrounds/PvP
+## SavedVariables: HonorSpyDB
+
+Libs\embeds.xml
+
+localization.lua
+
+honorspy.lua
+standings.lua
+overlay.lua
+estimator.lua
+export.lua
