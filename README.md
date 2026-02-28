@@ -31,10 +31,11 @@ Please reach out if you would like to see further enhancements. See you on the B
 
 ## Install
 
+> **Important:** Disable or remove any previous version of HonorSpy (including HonorSpyTurtle) before using this addon. Running both at the same time will cause conflicts.
+
 1. Download the latest release (or clone this repo)
 2. Place the `TurtleHonorSpyEnhanced` folder in your `Interface/AddOns/` directory
 3. If upgrading from HonorSpy or HonorSpyTurtle, your existing data will carry over automatically (same SavedVariables)
-4. Disable or remove any previous HonorSpy addon to avoid conflicts
 
 ## How It Works
 

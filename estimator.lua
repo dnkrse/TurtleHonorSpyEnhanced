@@ -64,6 +64,48 @@ getglobal(slider:GetName() .. "Low"):SetText("0")
 getglobal(slider:GetName() .. "High"):SetText("")
 getglobal(slider:GetName() .. "Text"):SetText("")
 
+-- ===== Current Honor Marker on Slider =====
+local markerLine = slider:CreateTexture(nil, "ARTWORK")
+markerLine:SetWidth(2)
+markerLine:SetHeight(20)
+markerLine:SetTexture(0.3, 0.8, 1, 0.8)
+markerLine:Hide()
+
+local markerLabel = slider:CreateFontString(nil, "ARTWORK")
+markerLabel:SetFont("Fonts\\FRIZQT__.TTF", 7)
+markerLabel:SetPoint("TOP", markerLine, "BOTTOM", 0, -1)
+markerLabel:SetTextColor(0.3, 0.8, 1)
+markerLabel:SetText("You")
+markerLabel:Hide()
+
+local cachedPlayerHonor = 0
+
+local function UpdateMarker()
+	if cachedPlayerHonor <= 0 then
+		markerLine:Hide()
+		markerLabel:Hide()
+		return
+	end
+	local sMin, sMax = slider:GetMinMaxValues()
+	local range = sMax - sMin
+	if range <= 0 then
+		markerLine:Hide()
+		markerLabel:Hide()
+		return
+	end
+	local frac = (cachedPlayerHonor - sMin) / range
+	if frac < 0 then frac = 0 end
+	if frac > 1 then frac = 1 end
+	-- Slider thumb travel area: account for thumb half-width on each side
+	local thumbHalf = 14
+	local usable = SLIDER_W - thumbHalf * 2
+	local xOff = thumbHalf + frac * usable - SLIDER_W / 2
+	markerLine:ClearAllPoints()
+	markerLine:SetPoint("CENTER", slider, "CENTER", xOff, 0)
+	markerLine:Show()
+	markerLabel:Show()
+end
+
 -- ===== Divider =====
 local div1 = Frame:CreateTexture(nil, "ARTWORK")
 div1:SetTexture(1, 1, 1, 0.15)
@@ -243,10 +285,12 @@ local function RebuildPoolData()
 	local pName = UnitName("player")
 	cachedPlayerRP = 0
 	cachedPlayerRank = 0
+	cachedPlayerHonor = 0
 	for i = 1, cachedPoolSize do
 		if t[i][1] == pName then
 			cachedPlayerRP = t[i][6]
 			cachedPlayerRank = t[i][7]
+			cachedPlayerHonor = t[i][3] or 0
 			break
 		end
 	end
@@ -257,6 +301,7 @@ local function RebuildPoolData()
 	maxHonor = math.ceil(maxHonor * 1.2 / 1000) * 1000
 	slider:SetMinMaxValues(0, maxHonor)
 	getglobal(slider:GetName() .. "High"):SetText(FormatNumber(maxHonor))
+	UpdateMarker()
 
 	return true
 end
@@ -450,10 +495,45 @@ local function UpdateEstimator(honorValue)
 	end
 end
 
+-- ===== Reset Button (declared early so OnValueChanged can reference it) =====
+local resetBtn = CreateFrame("Button", nil, Frame)
+resetBtn:SetWidth(40)
+resetBtn:SetHeight(14)
+resetBtn:SetPoint("LEFT", honorLabel, "RIGHT", 6, 0)
+
+local resetText = resetBtn:CreateFontString(nil, "OVERLAY")
+resetText:SetFont("Fonts\\FRIZQT__.TTF", 8)
+resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+resetText:SetText("|cff88ccff[Reset]|r")
+resetBtn:Hide()
+
 -- ===== Slider Script =====
 slider:SetScript("OnValueChanged", function()
 	local val = math.floor(this:GetValue() / 1000 + 0.5) * 1000
 	UpdateEstimator(val)
+	if val ~= cachedPlayerHonor then
+		resetBtn:Show()
+	else
+		resetBtn:Hide()
+	end
+end)
+
+resetBtn:SetScript("OnClick", function()
+	if cachedTable then
+		slider:SetValue(cachedPlayerHonor)
+		UpdateEstimator(cachedPlayerHonor)
+		resetBtn:Hide()
+	end
+end)
+resetBtn:SetScript("OnEnter", function()
+	resetText:SetText("|cffaaddff[Reset]|r")
+	GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+	GameTooltip:SetText("Reset to your current honor")
+	GameTooltip:Show()
+end)
+resetBtn:SetScript("OnLeave", function()
+	resetText:SetText("|cff88ccff[Reset]|r")
+	GameTooltip:Hide()
 end)
 
 -- ===== Toggle Function =====
@@ -475,6 +555,7 @@ function HonorSpyEstimator_Toggle()
 			end
 			slider:SetValue(curHonor)
 			UpdateEstimator(curHonor)
+			resetBtn:Hide()
 			Frame:Show()
 		end
 	end
