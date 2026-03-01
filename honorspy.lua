@@ -87,6 +87,8 @@ function HonorSpy:OnEnable()
 	self:RegisterEvent("UPDATE_MOUSEOVER_UNIT");
 	self:RegisterEvent("INSPECT_HONOR_UPDATE");
 	self:RegisterEvent("PLAYER_ENTERING_WORLD");
+	self:RegisterEvent("RAID_ROSTER_UPDATE");
+	self:RegisterEvent("PARTY_MEMBERS_CHANGED");
 	checkNeedReset();
 	if alliance[UnitRace("player")] == true
 	then
@@ -755,5 +757,64 @@ function HonorSpy:PLAYER_DEAD()
 			debugSend(self, "GROUP", pName, to_send)
 			debugSend(self, "GUILD", pName, to_send)
 		end
+	end
+end
+
+-- TRICKLE SYNC: send one standings entry per second to GROUP while grouped.
+-- Round-robins through the standings so data propagates while alive.
+local trickle_keys = {}   -- snapshot of player names from standings
+local trickle_idx = 0     -- current position in round-robin
+local trickle_active = false
+
+local function TrickleTick()
+	local standings = HonorSpy.db.realm.hs.currentStandings
+	-- Rebuild key list when we wrap around or it's empty
+	if trickle_idx >= table.getn(trickle_keys) then
+		trickle_keys = {}
+		for name in pairs(standings) do
+			table.insert(trickle_keys, name)
+		end
+		trickle_idx = 0
+		if table.getn(trickle_keys) == 0 then return end
+	end
+	trickle_idx = trickle_idx + 1
+	local pName = trickle_keys[trickle_idx]
+	local player = standings[pName]
+	if pName and player then
+		local to_send = sanitize_player_for_comm(player)
+		if to_send then
+			debugSend(HonorSpy, "GROUP", pName, to_send)
+		end
+	end
+end
+
+local function StartTrickleSync()
+	if trickle_active then return end
+	if GetNumRaidMembers() == 0 and GetNumPartyMembers() == 0 then return end
+	trickle_active = true
+	trickle_keys = {}
+	trickle_idx = 0
+	HonorSpy:ScheduleRepeatingEvent("HonorSpy_TrickleSync", TrickleTick, 1)
+end
+
+local function StopTrickleSync()
+	if not trickle_active then return end
+	trickle_active = false
+	HonorSpy:CancelScheduledEvent("HonorSpy_TrickleSync")
+end
+
+function HonorSpy:RAID_ROSTER_UPDATE()
+	if GetNumRaidMembers() > 0 then
+		StartTrickleSync()
+	else
+		StopTrickleSync()
+	end
+end
+
+function HonorSpy:PARTY_MEMBERS_CHANGED()
+	if GetNumRaidMembers() > 0 or GetNumPartyMembers() > 0 then
+		StartTrickleSync()
+	else
+		StopTrickleSync()
 	end
 end
