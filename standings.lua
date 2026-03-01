@@ -92,6 +92,7 @@ local function ApplyRow(r, d)
 		r.nRankFS:SetText("")
 		r.diffFS:SetText("")
 		r.stopIcon:Hide()
+		r.addonIcon:Hide()
 	else
 		r.rankIcon:SetTexture(d.rankIconPath)
 		r.rankIcon:SetAlpha(d.rankIconAlpha)
@@ -111,7 +112,18 @@ local function ApplyRow(r, d)
 		r.nRankIcon:Show()
 		r.nRankFS:SetText(d.nRankText)
 		r.diffFS:SetText(d.diffText)
+		-- Fixed slots after status: bomb at +12, skull at +26
+		local iconBase = C_STATUS.x + 12
+		if d._addonVer then
+			r.addonIcon:ClearAllPoints()
+			r.addonIcon:SetPoint("LEFT", r, "LEFT", iconBase, 0)
+			r.addonIcon:Show()
+		else
+			r.addonIcon:Hide()
+		end
 		if d._b14Safety == "over" then
+			r.stopIcon:ClearAllPoints()
+			r.stopIcon:SetPoint("LEFT", r, "LEFT", iconBase + 14, 0)
 			r.stopIcon:SetVertexColor(1, 1, 1)
 			r.stopIcon:Show()
 		else
@@ -184,6 +196,13 @@ local function CreateRow(vi, parent)
 	r.stopIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
 	r.stopIcon:Hide()
 
+	r.addonIcon = r:CreateTexture(nil, "ARTWORK")
+	r.addonIcon:SetWidth(12)
+	r.addonIcon:SetHeight(12)
+	r.addonIcon:SetTexture("Interface\\Icons\\Inv_Misc_Bomb_04")
+	r.addonIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	r.addonIcon:Hide()
+
 	-- Shared tooltip handlers — read data from r.rowData
 	r:SetScript("OnEnter", function()
 		local td = this.rowData
@@ -231,6 +250,13 @@ local function CreateRow(vi, parent)
 			GameTooltip:AddDoubleLine("Battleground:", "|cffff4444" .. td._bgZone .. "|r", 0.7, 0.7, 0.7, 1, 0.3, 0.3)
 		elseif td._isOnline then
 			GameTooltip:AddDoubleLine("Status:", "|cff88cc88Online|r", 0.7, 0.7, 0.7, 0.5, 0.8, 0.5)
+		end
+		if td._addonVer then
+			if td._addonVer == "pre-1.2" then
+				GameTooltip:AddDoubleLine("Addon:", "pre-1.2", 0.7, 0.7, 0.7, 0.8, 0.6, 0.2)
+			else
+				GameTooltip:AddDoubleLine("Addon:", "v" .. td._addonVer, 0.7, 0.7, 0.7, 0.33, 0.8, 1)
+			end
 		end
 		if td._b14Safety then
 			local players = td._b14_players
@@ -572,7 +598,17 @@ function HonorSpyStandings:RenderStandings()
 		b14_cutoff_honor = t[b14_slots + 1][3] or 0
 		b14_cutoff_name  = t[b14_slots + 1][1]
 		if b14_cutoff_honor > 0 then
-			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000)
+			local hs = HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+			local reset_day = (hs and hs.reset_day) or 3
+			local wd = tonumber(date("!%w"))
+			local hh = tonumber(date("!%H"))
+			local mm = tonumber(date("!%M"))
+			local rawD = 7 + reset_day - wd
+			local daysUntil = rawD - math.floor(rawD / 7) * 7
+			if daysUntil == 0 then daysUntil = 7 end
+			local daysLeft = daysUntil - (hh * 60 + mm) / 1440
+			local timeMult = 1 + math.max(0, daysLeft - 1) * 0.5
+			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000) * timeMult
 			b14_safe_target = math.floor(b14_cutoff_honor + safeMargin + 0.5)
 		end
 	end
@@ -709,12 +745,15 @@ function HonorSpyStandings:RenderStandings()
 			onlineDot = "|cff333333o|r"
 		end
 
+		local addonEntry = THSE_AddonUsers and THSE_AddonUsers[name] or nil
+		local addonVer = addonEntry and addonEntry.ver or nil
+		-- addonVer is used for the icon in row rendering (addonIcon texture)
+
 		local b14Safety, b14Buffer, b14BufferPct = nil, 0, 0
 		if my_bracket == 14 and b14_slots >= 1 and b14_cutoff_honor > 0 then
-			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000)
 			b14Buffer = thisWeekHonor - b14_cutoff_honor
 			b14BufferPct = b14_cutoff_honor > 0 and (b14Buffer / b14_cutoff_honor * 100) or 0
-			if b14Buffer > safeMargin then
+			if b14_safe_target > 0 and thisWeekHonor > b14_safe_target then
 				b14Safety = "over"
 			end
 		end
@@ -755,6 +794,7 @@ function HonorSpyStandings:RenderStandings()
 			_last_seen_human = last_seen_human,
 			_bgZone = bgFriends[name],
 			_isOnline = onlineFriends[name],
+			_addonVer = addonVer,
 			_b14Safety = b14Safety,
 			_b14Buffer = b14Buffer,
 			_b14BufferPct = b14BufferPct,

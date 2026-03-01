@@ -48,6 +48,23 @@ HonorSpy_FailedChunks = {}
 -- Temporary slot used by AceComm-2.0 HandleMessage to pass context into Deserialize's error handler
 HonorSpy_PendingChunk = nil
 
+-- Suppress AceComm/serialization errors unless debug mode is on.
+-- WoW 1.12 fires the global error handler even inside pcall, so corrupt
+-- comm data from other players causes red ERROR spam.
+do
+	local origHandler = geterrorhandler()
+	seterrorhandler(function(msg)
+		if not HonorSpyCommDebug then
+			local s = msg or ""
+			if string.find(s, "AceComm") or string.find(s, "Deserialize")
+			   or string.find(s, "HandleMessage") or string.find(s, "CHAT_MSG_ADDON") then
+				return  -- swallow silently
+			end
+		end
+		if origHandler then return origHandler(msg) end
+	end)
+end
+
 -- Debug-aware send wrapper: logs outgoing data to chat when HonorSpyCommDebug is enabled
 local function debugSend(self, dist, pName, data)
 	if HonorSpyCommDebug then
@@ -729,6 +746,29 @@ function store_player(playerName, player)
   end
 end
 
+-- Track that a comm sender is using some HonorSpy addon.
+-- If they haven't sent a VER broadcast, they're running something before v1.2
+-- (which introduced the version check). A real VER broadcast overwrites this.
+local function tagSenderAddon(sender)
+	if type(sender) ~= "string" or sender == UnitName("player") then return end
+	if not THSE_AddonUsers then return end
+	local existing = THSE_AddonUsers[sender]
+	-- If already identified via version broadcast (real version), just refresh timestamp
+	if existing and existing.ver ~= "pre-1.2" then
+		existing.seen = time()
+		return
+	end
+	-- No VER broadcast received → pre-1.2
+	if not existing then
+		THSE_AddonUsers[sender] = { ver = "pre-1.2", seen = time() }
+		local hs = HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+		if hs then
+			if not hs.addonUsers then hs.addonUsers = {} end
+			hs.addonUsers[sender] = THSE_AddonUsers[sender]
+		end
+	end
+end
+
 -- RECEIVE via AceComm-2.0
 function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player, filtered_players)
 	if HonorSpyCommDebug then
@@ -738,9 +778,11 @@ function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player
 		for pn, pl in pairs(filtered_players) do
 			store_player(pn, pl)
 		end
+		tagSenderAddon(sender)
 		return
 	end
 	if type(playerName) ~= "string" then return end
+	tagSenderAddon(sender)
 	store_player(playerName, player)
 end
 

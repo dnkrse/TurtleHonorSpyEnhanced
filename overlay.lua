@@ -303,9 +303,7 @@ overshootSubText:SetPoint("RIGHT", overshootBtn, "RIGHT", -6, 0)
 overshootSubText:SetJustifyH("LEFT")
 overshootSubText:SetTextColor(0.53, 0.8, 1)
 
-local overshootExcess = 0
-local overshootTarget = 0
-local overshootB14Players = {}
+local overshootState = { excess = 0, target = 0, daysLeft = 0, b14Players = {} }
 
 -- Debug: set via /hsver honor N to simulate a different thisWeekHonor
 HonorSpyDebugHonorOverride = nil
@@ -323,12 +321,13 @@ overshootBtn:SetScript("OnEnter", function()
 	GameTooltip:AddLine("widening gap between you and other B14", 0.9, 0.9, 0.9)
 	GameTooltip:AddLine("players distorts the RP curve, which can", 0.9, 0.9, 0.9)
 	GameTooltip:AddLine("reduce the RP they earn this week.", 0.9, 0.9, 0.9)
-	if overshootExcess > 0 then
-		local myHonorTotal = overshootExcess + overshootTarget
+	if overshootState.excess > 0 then
+		local myHonorTotal = overshootState.excess + overshootState.target
 		GameTooltip:AddLine(" ", 1, 1, 1)
 		GameTooltip:AddDoubleLine("Your honor:",   string.format("%d", myHonorTotal),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
-		GameTooltip:AddDoubleLine("Safe target:",  string.format("%d", overshootTarget), 0.7, 0.7, 0.7, 1, 1, 1)
-		GameTooltip:AddDoubleLine("Excess:",       string.format("+%d", overshootExcess), 0.7, 0.7, 0.7, 1, 0.5, 0.5)
+		GameTooltip:AddDoubleLine("Safe target:",  string.format("%d", overshootState.target), 0.7, 0.7, 0.7, 1, 1, 1)
+		GameTooltip:AddDoubleLine("Excess:",       string.format("+%d", overshootState.excess), 0.7, 0.7, 0.7, 1, 0.5, 0.5)
+		GameTooltip:AddDoubleLine("Days to reset:", string.format("%.1f", overshootState.daysLeft), 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
 	end
 	GameTooltip:AddLine(" ", 1, 1, 1)
 	GameTooltip:AddLine("See the standings table for a per-player", 0.87, 0.73, 0.27)
@@ -349,8 +348,20 @@ local FRAME_H_WARN   = 190
 -- Overshoot trigger: honor must exceed cutoff by more than this margin.
 -- The margin is pct-based at low brackets but capped so high-cutoff brackets
 -- don't require an unreachable gap before the warning fires.
-local OVERSHOOT_PCT        = 0.15   -- 15%
-local OVERSHOOT_MAX_MARGIN = 60000  -- absolute cap (tune as needed)
+local OVERSHOOT = { PCT = 0.15, MAX_MARGIN = 60000, DAY_SCALE = 0.5 }
+
+-- Fractional days until the next PVP reset (0 = imminent, ~7 = just reset).
+function OVERSHOOT.GetDaysUntilReset()
+	local hs = HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local reset_day = (hs and hs.reset_day) or 3
+	local day = tonumber(date("!%w"))
+	local h   = tonumber(date("!%H"))
+	local m   = tonumber(date("!%M"))
+	local raw = 7 + reset_day - day
+	local daysUntil = raw - math.floor(raw / 7) * 7
+	if daysUntil == 0 then daysUntil = 7 end
+	return daysUntil - (h * 60 + m) / 1440
+end
 
 -- ===== Calculation Helpers (mirrors standings.lua logic) =====
 local brk_pct_0 = {[0]=1, [1]=0.845, [2]=0.697, [3]=0.566, [4]=0.436, [5]=0.327, [6]=0.228, [7]=0.159, [8]=0.100, [9]=0.060, [10]=0.035, [11]=0.020, [12]=0.008, [13]=0.003}
@@ -593,21 +604,25 @@ local function UpdateOverlay()
 	if myBracket == 14 and b14_slots >= 1 and b14_slots < pool_size then
 		local b14_cutoff_honor = t[b14_slots + 1][3] or 0
 		if b14_cutoff_honor > 0 then
-			local safeMargin = math.min(b14_cutoff_honor * OVERSHOOT_PCT, OVERSHOOT_MAX_MARGIN)
+			local daysOk, daysLeft = pcall(OVERSHOOT.GetDaysUntilReset)
+			if not daysOk or type(daysLeft) ~= "number" then daysLeft = 1 end
+			local timeMult = 1 + math.max(0, daysLeft - 1) * OVERSHOOT.DAY_SCALE
+			local safeMargin = math.min(b14_cutoff_honor * OVERSHOOT.PCT, OVERSHOOT.MAX_MARGIN) * timeMult
 			local excess = thisWeekHonor - b14_cutoff_honor
 			if excess > safeMargin then
 				isOver = true
 				local safeTarget = math.floor(b14_cutoff_honor + safeMargin + 0.5)
-				overshootExcess = thisWeekHonor - safeTarget
-				overshootTarget = safeTarget
+				overshootState.excess = thisWeekHonor - safeTarget
+				overshootState.target = safeTarget
+				overshootState.daysLeft = daysLeft
 				overshootText:SetText("You might be farming too much honor!")
 				overshootSubText:SetText("[More Details]")
 
 				-- Collect other B14 players
-				overshootB14Players = {}
+				overshootState.b14Players = {}
 				for j = 1, b14_slots do
 					if t[j] and t[j][1] ~= playerName then
-						table.insert(overshootB14Players, {
+						table.insert(overshootState.b14Players, {
 							name  = t[j][1],
 							honor = t[j][3] or 0,
 							award = math.floor(CalcRpEarning(t[j][3] or 0) + 0.5),

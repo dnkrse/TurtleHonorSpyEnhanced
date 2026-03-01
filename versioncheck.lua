@@ -7,6 +7,34 @@ local MY_VERSION = GetAddOnMetadata(ADDON_NAME, "Version") or "0.0.0"
 local MSG_PREFIX = "THSE"
 local updateNotified = false
 
+-- Global table so standings.lua can read who has the addon installed
+-- Entries: THSE_AddonUsers[name] = { ver = "x.y.z", seen = <timestamp> }
+THSE_AddonUsers = {}
+local EXPIRY_SECONDS = 7 * 24 * 60 * 60  -- 7 days
+
+local function LoadAddonUsers()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if not hs then return end
+	if not hs.addonUsers then hs.addonUsers = {} end
+	local now = time()
+	for name, entry in pairs(hs.addonUsers) do
+		if type(entry) == "table" and entry.seen and (now - entry.seen) < EXPIRY_SECONDS then
+			THSE_AddonUsers[name] = entry
+		else
+			hs.addonUsers[name] = nil
+		end
+	end
+end
+
+local function SaveAddonUser(name, version)
+	THSE_AddonUsers[name] = { ver = version, seen = time() }
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs then
+		if not hs.addonUsers then hs.addonUsers = {} end
+		hs.addonUsers[name] = THSE_AddonUsers[name]
+	end
+end
+
 local function ParseVersion(str)
 	-- isolate only the leading x.y.z part before any separator
 	local vpart = str
@@ -34,6 +62,8 @@ local function CompareVersions(a, b)
 end
 
 local function BroadcastVersion()
+	local me = UnitName("player")
+	if me then SaveAddonUser(me, MY_VERSION) end
 	local msg = "VER:" .. MY_VERSION
 	if IsInGuild() then
 		SendAddonMessage(MSG_PREFIX, msg, "GUILD")
@@ -43,6 +73,12 @@ local function BroadcastVersion()
 	elseif GetNumPartyMembers() > 0 then
 		SendAddonMessage(MSG_PREFIX, msg, "PARTY")
 	end
+end
+
+-- Reply to a version request with our version (only to the channel it came from)
+local function ReplyVersion(distribution)
+	local msg = "VER:" .. MY_VERSION
+	SendAddonMessage(MSG_PREFIX, msg, distribution)
 end
 
 local function OnRemoteVersion(version)
@@ -70,6 +106,8 @@ frame:RegisterEvent("RAID_ROSTER_UPDATE")
 
 local broadcastDelay = 0
 local needsBroadcast = false
+local REBROADCAST_INTERVAL = 600  -- re-broadcast every 10 minutes
+local timeSinceLastBroadcast = 0
 
 frame:SetScript("OnEvent", function()
 	if event == "CHAT_MSG_ADDON" then
@@ -80,12 +118,19 @@ frame:SetScript("OnEvent", function()
 				msgType, payload = "VER", arg2
 			end
 			if msgType == "VER" then
+				SaveAddonUser(arg4, payload)
 				OnRemoteVersion(payload)
+			elseif msgType == "REQ" then
+				-- Someone is asking for our version; reply on the same channel
+				ReplyVersion(arg3)
 			end
 			-- future message types handled here
 		end
-	elseif event == "PLAYER_ENTERING_WORLD"
-		or event == "PARTY_MEMBERS_CHANGED"
+	elseif event == "PLAYER_ENTERING_WORLD" then
+		LoadAddonUsers()
+		needsBroadcast = true
+		broadcastDelay = 0
+	elseif event == "PARTY_MEMBERS_CHANGED"
 		or event == "RAID_ROSTER_UPDATE" then
 		needsBroadcast = true
 		broadcastDelay = 0
@@ -97,6 +142,24 @@ frame:SetScript("OnUpdate", function()
 		broadcastDelay = broadcastDelay + arg1
 		if broadcastDelay >= 5 then
 			needsBroadcast = false
+			BroadcastVersion()
+			timeSinceLastBroadcast = 0
+			-- Also send a request so others reply with their version
+			local reqMsg = "REQ:1"
+			if IsInGuild() then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD")
+			end
+			if GetNumRaidMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
+			elseif GetNumPartyMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
+			end
+		end
+	else
+		-- Periodic re-broadcast
+		timeSinceLastBroadcast = timeSinceLastBroadcast + arg1
+		if timeSinceLastBroadcast >= REBROADCAST_INTERVAL then
+			timeSinceLastBroadcast = 0
 			BroadcastVersion()
 		end
 	end
@@ -153,6 +216,35 @@ SlashCmdList["HSVER"] = function(msg)
 		end
 	elseif msg == "debug" then
 		HonorSpy:ToggleDebugMenu()
+	elseif msg == "users" or msg == "users reset" then
+		if msg == "users reset" then
+			THSE_AddonUsers = {}
+			local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+			if hs then hs.addonUsers = {} end
+			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Addon users list cleared.", 1, 0.82, 0)
+			return
+		end
+		local count = 0
+		if THSE_AddonUsers then
+			for name, entry in pairs(THSE_AddonUsers) do
+				local ver = type(entry) == "table" and entry.ver or tostring(entry)
+				local seenAgo = ""
+				if type(entry) == "table" and entry.seen then
+					local diff = time() - entry.seen
+					if diff < 3600 then
+						seenAgo = string.format(" (%dm ago)", math.floor(diff / 60))
+					elseif diff < 86400 then
+						seenAgo = string.format(" (%.1fh ago)", diff / 3600)
+					else
+						seenAgo = string.format(" (%.1fd ago)", diff / 86400)
+					end
+				end
+				local color = ver == "pre-1.2" and "ffaa44" or "55ccff"
+				DEFAULT_CHAT_FRAME:AddMessage("  |cffffffff" .. name .. "|r — |cff" .. color .. ver .. "|r" .. seenAgo, 0.7, 0.7, 0.7)
+				count = count + 1
+			end
+		end
+		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r " .. count .. " known addon user(s).", 1, 0.82, 0)
 	else
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r v" .. MY_VERSION, 1, 0.82, 0)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver test — simulate update available", 0.7, 0.7, 0.7)
@@ -162,5 +254,7 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor 250000 — override your honor value", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor reset — clear honor override", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug — toggle debug menu in right-click dropdown", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users — list known addon users and versions", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
 	end
 end
