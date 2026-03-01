@@ -418,6 +418,12 @@ end
 -----------------------------------------------------------------------
 -- BuildStandingsTable  (unchanged business logic)
 -----------------------------------------------------------------------
+local raceDisplayNames = {
+	NightElf = "Night Elf",
+	BloodElf = "High Elf",
+	HighElf = "High Elf",
+}
+
 function HonorSpyStandings:BuildStandingsTable()
 	local t = {}
 	local eFaction = {}
@@ -431,7 +437,8 @@ function HonorSpyStandings:BuildStandingsTable()
 
 	for pn, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
 		if not (player.race and eFaction[player.race]) then
-			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked, player.race })
+			local displayRace = raceDisplayNames[player.race] or player.race
+			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked, displayRace })
 		end
 	end
 	local sort_column = 3
