@@ -8,7 +8,7 @@ local INNER_W = 194
 -- ===== Frame Setup =====
 local Frame = CreateFrame("Frame", "HonorSpyOverlayFrame", UIParent)
 Frame:SetWidth(210)
-Frame:SetHeight(132)
+Frame:SetHeight(150)
 Frame:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
 Frame:SetFrameStrata("HIGH")
 Frame:SetFrameLevel(10)
@@ -141,7 +141,7 @@ end)
 local rankIcon = Frame:CreateTexture(nil, "ARTWORK")
 rankIcon:SetWidth(26)
 rankIcon:SetHeight(26)
-rankIcon:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -PAD)
+rankIcon:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -26)
 
 local rankName = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 rankName:SetPoint("TOPLEFT", rankIcon, "TOPRIGHT", 5, -1)
@@ -158,7 +158,7 @@ local barBg = Frame:CreateTexture(nil, "ARTWORK")
 barBg:SetTexture(0, 0, 0, 0.5)
 barBg:SetWidth(INNER_W)
 barBg:SetHeight(10)
-barBg:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -40)
+barBg:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -58)
 
 -- Green gain bar (behind blue bar)
 local barGain = CreateFrame("StatusBar", nil, Frame)
@@ -189,26 +189,26 @@ local div1 = Frame:CreateTexture(nil, "ARTWORK")
 div1:SetTexture(1, 1, 1, 0.15)
 div1:SetWidth(INNER_W)
 div1:SetHeight(1)
-div1:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -54)
+div1:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -72)
 
 -- ===== Section 2: This Week Stats (two columns) =====
 local honorLeft = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-honorLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -59)
+honorLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -77)
 honorLeft:SetJustifyH("LEFT")
 honorLeft:SetTextColor(0.7, 0.7, 0.7)
 
 local honorRight = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-honorRight:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -59)
+honorRight:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -77)
 honorRight:SetJustifyH("RIGHT")
 honorRight:SetTextColor(0.87, 0.73, 0.27)
 
 local standLeft = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-standLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -71)
+standLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -89)
 standLeft:SetJustifyH("LEFT")
 standLeft:SetTextColor(0.7, 0.7, 0.7)
 
 local standRight = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-standRight:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -71)
+standRight:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -89)
 standRight:SetJustifyH("RIGHT")
 standRight:SetTextColor(1, 1, 1)
 
@@ -217,11 +217,11 @@ local div2 = Frame:CreateTexture(nil, "ARTWORK")
 div2:SetTexture(1, 1, 1, 0.15)
 div2:SetWidth(INNER_W)
 div2:SetHeight(1)
-div2:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -84)
+div2:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -102)
 
 -- ===== Section 3: Next Week Estimate =====
 local nextWeekLabel = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-nextWeekLabel:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -88)
+nextWeekLabel:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -106)
 nextWeekLabel:SetJustifyH("LEFT")
 nextWeekLabel:SetTextColor(0.7, 0.7, 0.7)
 nextWeekLabel:SetText("Next Week:")
@@ -229,7 +229,7 @@ nextWeekLabel:SetText("Next Week:")
 local nextIcon = Frame:CreateTexture(nil, "ARTWORK")
 nextIcon:SetWidth(20)
 nextIcon:SetHeight(20)
-nextIcon:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -100)
+nextIcon:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -118)
 
 local nextRank = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 nextRank:SetPoint("TOPLEFT", nextIcon, "TOPRIGHT", 4, 0)
@@ -243,13 +243,114 @@ nextRPText:SetJustifyH("LEFT")
 nextRPText:SetTextColor(0.87, 0.73, 0.27)
 
 local netRPLabel = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-netRPLabel:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -100)
+netRPLabel:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -118)
 netRPLabel:SetJustifyH("RIGHT")
 
 local nextRPRight = Frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 nextRPRight:SetPoint("TOPRIGHT", netRPLabel, "BOTTOMRIGHT", 0, -1)
 nextRPRight:SetJustifyH("RIGHT")
 nextRPRight:SetTextColor(0.87, 0.73, 0.27)
+
+-- ===== Header Bar =====
+local hdrDiv = Frame:CreateTexture(nil, "ARTWORK")
+hdrDiv:SetTexture(1, 1, 1, 0.15)
+hdrDiv:SetWidth(INNER_W)
+hdrDiv:SetHeight(1)
+hdrDiv:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -20)
+
+local versionFooter = Frame:CreateFontString(nil, "OVERLAY")
+versionFooter:SetFont("Fonts\\FRIZQT__.TTF", 9)
+versionFooter:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -6)
+versionFooter:SetJustifyH("LEFT")
+versionFooter:SetTextColor(0.35, 0.35, 0.35)
+local tocVer = GetAddOnMetadata("TurtleHonorSpyEnhanced", "Version") or ""
+versionFooter:SetText("v" .. tocVer)
+Frame.versionFooter = versionFooter
+
+-- ===== Overshoot Warning =====
+local overshootDiv = Frame:CreateTexture(nil, "ARTWORK")
+overshootDiv:SetTexture(1, 1, 1, 0.15)
+overshootDiv:SetWidth(INNER_W)
+overshootDiv:SetHeight(1)
+overshootDiv:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -150)
+overshootDiv:Hide()
+
+local overshootBtn = CreateFrame("Button", nil, Frame)
+overshootBtn:SetWidth(INNER_W)
+overshootBtn:SetHeight(24)
+overshootBtn:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -157)
+overshootBtn:Hide()
+
+local overshootIcon = overshootBtn:CreateTexture(nil, "ARTWORK")
+overshootIcon:SetWidth(20)
+overshootIcon:SetHeight(20)
+overshootIcon:SetPoint("TOPLEFT", overshootBtn, "TOPLEFT", 0, 0)
+overshootIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
+overshootIcon:SetVertexColor(1, 1, 1)
+
+local overshootText = overshootBtn:CreateFontString(nil, "OVERLAY")
+overshootText:SetFont("Fonts\\FRIZQT__.TTF", 8)
+overshootText:SetPoint("TOPLEFT", overshootBtn, "TOPLEFT", 23, -1)
+overshootText:SetPoint("RIGHT", overshootBtn, "RIGHT", -6, 0)
+overshootText:SetJustifyH("LEFT")
+overshootText:SetTextColor(1, 0.3, 0.3)
+overshootText:SetText("You might be farming too much honor!")
+
+local overshootSubText = overshootBtn:CreateFontString(nil, "OVERLAY")
+overshootSubText:SetFont("Fonts\\FRIZQT__.TTF", 8)
+overshootSubText:SetPoint("TOPLEFT", overshootText, "BOTTOMLEFT", 0, -1)
+overshootSubText:SetPoint("RIGHT", overshootBtn, "RIGHT", -6, 0)
+overshootSubText:SetJustifyH("LEFT")
+overshootSubText:SetTextColor(0.53, 0.8, 1)
+
+local overshootExcess = 0
+local overshootTarget = 0
+local overshootB14Players = {}
+
+-- Debug: set via /hsver honor N to simulate a different thisWeekHonor
+HonorSpyDebugHonorOverride = nil
+
+overshootBtn:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_BOTTOM")
+	GameTooltip:ClearLines()
+	GameTooltip:AddLine("Bracket 14 - Honor Overshoot", 1, 0.82, 0)
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("Your honor this week is significantly higher", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("than what is needed to hold your B14 slot.", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("Extra honor beyond your bracket cutoff does", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("not increase your RP reward. However, the", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("widening gap between you and other B14", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("players distorts the RP curve, which can", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("reduce the RP they earn this week.", 0.9, 0.9, 0.9)
+	if overshootExcess > 0 then
+		local myHonorTotal = overshootExcess + overshootTarget
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddDoubleLine("Your honor:",   string.format("%d", myHonorTotal),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
+		GameTooltip:AddDoubleLine("Safe target:",  string.format("%d", overshootTarget), 0.7, 0.7, 0.7, 1, 1, 1)
+		GameTooltip:AddDoubleLine("Excess:",       string.format("+%d", overshootExcess), 0.7, 0.7, 0.7, 1, 0.5, 0.5)
+	end
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("See the standings table for a per-player", 0.87, 0.73, 0.27)
+	GameTooltip:AddLine("breakdown of current RP awards.", 0.87, 0.73, 0.27)
+	GameTooltip:Show()
+end)
+overshootBtn:SetScript("OnLeave", function()
+	GameTooltip:Hide()
+end)
+
+Frame.overshootDiv = overshootDiv
+Frame.overshootBtn = overshootBtn
+Frame.overshootText = overshootText
+
+local FRAME_H_NORMAL = 150
+local FRAME_H_WARN   = 190
+
+-- Overshoot trigger: honor must exceed cutoff by more than this margin.
+-- The margin is pct-based at low brackets but capped so high-cutoff brackets
+-- don't require an unreachable gap before the warning fires.
+local OVERSHOOT_PCT        = 0.15   -- 15%
+local OVERSHOOT_MAX_MARGIN = 60000  -- absolute cap (tune as needed)
 
 -- ===== Calculation Helpers (mirrors standings.lua logic) =====
 local brk_pct_0 = {[0]=1, [1]=0.845, [2]=0.697, [3]=0.566, [4]=0.436, [5]=0.327, [6]=0.228, [7]=0.159, [8]=0.100, [9]=0.060, [10]=0.035, [11]=0.020, [12]=0.008, [13]=0.003}
@@ -366,6 +467,7 @@ local function UpdateOverlay()
 	end
 
 	local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(myData)
+	if HonorSpyDebugHonorOverride then thisWeekHonor = HonorSpyDebugHonorOverride end
 
 	-- === Section 1: Current Rank ===
 	if rank > 0 then
@@ -484,6 +586,46 @@ local function UpdateOverlay()
 		netRPLabel:SetText("|cffff6666" .. rpSign .. weekRP .. " RP|r")
 	end
 	nextRPRight:SetText(estRPStr .. " RP")
+
+	-- === B14 Overshoot Warning ===
+	local b14_slots = BRK[13]
+	local isOver = false
+	if myBracket == 14 and b14_slots >= 1 and b14_slots < pool_size then
+		local b14_cutoff_honor = t[b14_slots + 1][3] or 0
+		if b14_cutoff_honor > 0 then
+			local safeMargin = math.min(b14_cutoff_honor * OVERSHOOT_PCT, OVERSHOOT_MAX_MARGIN)
+			local excess = thisWeekHonor - b14_cutoff_honor
+			if excess > safeMargin then
+				isOver = true
+				local safeTarget = math.floor(b14_cutoff_honor + safeMargin + 0.5)
+				overshootExcess = thisWeekHonor - safeTarget
+				overshootTarget = safeTarget
+				overshootText:SetText("You might be farming too much honor!")
+				overshootSubText:SetText("[More Details]")
+
+				-- Collect other B14 players
+				overshootB14Players = {}
+				for j = 1, b14_slots do
+					if t[j] and t[j][1] ~= playerName then
+						table.insert(overshootB14Players, {
+							name  = t[j][1],
+							honor = t[j][3] or 0,
+							award = math.floor(CalcRpEarning(t[j][3] or 0) + 0.5),
+						})
+					end
+				end
+			end
+		end
+	end
+	if isOver then
+		overshootDiv:Show()
+		overshootBtn:Show()
+		Frame:SetHeight(FRAME_H_WARN)
+	else
+		overshootDiv:Hide()
+		overshootBtn:Hide()
+		Frame:SetHeight(FRAME_H_NORMAL)
+	end
 end
 
 -- ===== Initialization via events =====

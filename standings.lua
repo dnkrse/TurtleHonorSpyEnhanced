@@ -1,11 +1,10 @@
-local T = AceLibrary("Tablet-2.0")
 local C = AceLibrary("Crayon-2.0")
 local BC = AceLibrary("Babble-Class-2.2")
 local L = AceLibrary("AceLocale-2.2"):new("HonorSpy")
 
 HonorSpyStandings = HonorSpy:NewModule("HonorSpyStandings", "AceDB-2.0")
 
-local playerName = UnitName("player");
+local playerName = UnitName("player")
 
 -- Reusable rank icon texture for GameTooltip hover
 local ttRankIcon = GameTooltip:CreateTexture("HonorSpyTooltipRankIcon", "OVERLAY")
@@ -13,70 +12,434 @@ ttRankIcon:SetWidth(16)
 ttRankIcon:SetHeight(16)
 ttRankIcon:Hide()
 
+-----------------------------------------------------------------------
+-- Layout constants
+-----------------------------------------------------------------------
+local ROW_H       = 18
+local PAD         = 8
+local HDR_H       = 20
+local MAX_VISIBLE = 25
+local FRAME_W     = 565
+
+-- Column layout: x = left offset inside row, w = width, j = justification
+local C_RICON  = {x = 4,   w = 16}
+local C_NAME   = {x = 24,  w = 120, j = "LEFT"}
+local C_STATUS = {x = 146, w = 18,  j = "LEFT"}
+local C_HONOR  = {x = 166, w = 65,  j = "RIGHT"}
+local C_RPAW   = {x = 235, w = 50,  j = "LEFT"}
+local C_TOTRP  = {x = 292, w = 55,  j = "RIGHT"}
+local C_GAIN   = {x = 352, w = 55,  j = "LEFT"}
+local C_CRANK  = {x = 408, w = 30,  j = "RIGHT"}
+local C_CICON  = {x = 440, w = 14}
+local C_NRANK  = {x = 462, w = 30,  j = "RIGHT"}
+local C_NICON  = {x = 494, w = 14}
+local C_DIFF   = {x = 516, w = 25,  j = "RIGHT"}
+
+-----------------------------------------------------------------------
+-- State
+-----------------------------------------------------------------------
+local mainFrame, bodyFrame
+local rows = {}         -- fixed pool of MAX_VISIBLE row frames
+local scrollOffset = 0  -- index of first visible data row (0-based)
+local displayRows = {}  -- built by RenderStandings, read by UpdateRows
+
+-----------------------------------------------------------------------
+-- Helpers
+-----------------------------------------------------------------------
+local function MakeFS(parent, col)
+	local fs = parent:CreateFontString(nil, "OVERLAY", "GameTooltipText")
+	fs:SetPoint("LEFT", parent, "LEFT", col.x, 0)
+	fs:SetWidth(col.w)
+	fs:SetJustifyH(col.j or "LEFT")
+	return fs
+end
+
+local function MakeIcon(parent, col, size)
+	local tex = parent:CreateTexture(nil, "ARTWORK")
+	tex:SetWidth(size)
+	tex:SetHeight(size)
+	tex:SetPoint("LEFT", parent, "LEFT", col.x, 0)
+	return tex
+end
+
+-----------------------------------------------------------------------
+-- Apply one data row to one visible row frame
+-----------------------------------------------------------------------
+local function ApplyRow(r, d)
+	if not d then
+		r:Hide()
+		return
+	end
+	r:Show()
+	if d.type == "sep" then
+		r.rankIcon:Hide()
+		r.nameFS:SetText(C:Colorize("888866", string.format("-- Bracket %d --", d.bracket)))
+		if d._ext then
+			r:EnableMouse(true)
+			r.rowData = d
+		else
+			r:EnableMouse(false)
+			r.rowData = nil
+		end
+		r.statusFS:SetText("")
+		r.honorFS:SetText("")
+		r.rpAwFS:SetText("")
+		r.totRPFS:SetText(d.showTotal and C:Colorize("666644", "Total") or "")
+		r.gainFS:SetText("")
+		r.cRankIcon:Hide()
+		r.cRankFS:SetText("")
+		r.nRankIcon:Hide()
+		r.nRankFS:SetText("")
+		r.diffFS:SetText("")
+		r.stopIcon:Hide()
+	else
+		r.rankIcon:SetTexture(d.rankIconPath)
+		r.rankIcon:SetAlpha(d.rankIconAlpha)
+		r.rankIcon:Show()
+		r.nameFS:SetText(d.nameText)
+		r.statusFS:SetText(d.statusText)
+		r.honorFS:SetText(d.honorText)
+		r.rpAwFS:SetText(d.rpAwText)
+		r.totRPFS:SetText(d.totRPText)
+		r.gainFS:SetText(d.gainText)
+		r.cRankIcon:SetTexture(d.cRankIconPath)
+		r.cRankIcon:SetAlpha(d.cRankIconAlpha)
+		r.cRankIcon:Show()
+		r.cRankFS:SetText(d.cRankText)
+		r.nRankIcon:SetTexture(d.nRankIconPath)
+		r.nRankIcon:SetAlpha(d.nRankIconAlpha)
+		r.nRankIcon:Show()
+		r.nRankFS:SetText(d.nRankText)
+		r.diffFS:SetText(d.diffText)
+		if d._b14Safety == "over" then
+			r.stopIcon:SetVertexColor(1, 1, 1)
+			r.stopIcon:Show()
+		else
+			r.stopIcon:Hide()
+		end
+		r:EnableMouse(true)
+		r.rowData = d  -- for tooltip handler
+	end
+end
+
+-----------------------------------------------------------------------
+-- Refresh all visible rows from displayRows + scrollOffset
+-----------------------------------------------------------------------
+local function UpdateVisibleRows()
+	for vi = 1, MAX_VISIBLE do
+		local dataIdx = scrollOffset + vi
+		ApplyRow(rows[vi], displayRows[dataIdx])
+	end
+end
+
+-----------------------------------------------------------------------
+-- Scroll (virtual — just changes offset & rebinds data)
+-----------------------------------------------------------------------
+local function OnMouseWheel()
+	local totalRows = table.getn(displayRows)
+	local maxOffset = math.max(0, totalRows - MAX_VISIBLE)
+	if arg1 > 0 then
+		scrollOffset = math.max(0, scrollOffset - 3)
+	else
+		scrollOffset = math.min(maxOffset, scrollOffset + 3)
+	end
+	UpdateVisibleRows()
+end
+
+-----------------------------------------------------------------------
+-- Row creation (one-time, fixed pool)
+-----------------------------------------------------------------------
+local function CreateRow(vi, parent)
+	local r = CreateFrame("Frame", "HSSRow" .. vi, parent)
+	r:SetHeight(ROW_H)
+	r:SetWidth(FRAME_W - PAD * 2)
+	r:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((vi - 1) * ROW_H))
+	r:EnableMouse(true)
+	r:EnableMouseWheel(true)
+	r:SetScript("OnMouseWheel", OnMouseWheel)
+
+	r.hl = r:CreateTexture(nil, "HIGHLIGHT")
+	r.hl:SetAllPoints()
+	r.hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+	r.hl:SetBlendMode("ADD")
+	r.hl:SetAlpha(0.15)
+
+	r.rankIcon  = MakeIcon(r, C_RICON, 16)
+	r.nameFS    = MakeFS(r, C_NAME)
+	r.statusFS  = MakeFS(r, C_STATUS)
+	r.honorFS   = MakeFS(r, C_HONOR)
+	r.rpAwFS    = MakeFS(r, C_RPAW)
+	r.totRPFS   = MakeFS(r, C_TOTRP)
+	r.gainFS    = MakeFS(r, C_GAIN)
+	r.cRankIcon = MakeIcon(r, C_CICON, 14)
+	r.cRankFS   = MakeFS(r, C_CRANK)
+	r.nRankIcon = MakeIcon(r, C_NICON, 14)
+	r.nRankFS   = MakeFS(r, C_NRANK)
+	r.diffFS    = MakeFS(r, C_DIFF)
+
+	r.stopIcon = r:CreateTexture(nil, "OVERLAY")
+	r.stopIcon:SetWidth(14)
+	r.stopIcon:SetHeight(14)
+	r.stopIcon:SetPoint("LEFT", r, "LEFT", 162, 0)
+	r.stopIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
+	r.stopIcon:Hide()
+
+	-- Shared tooltip handlers — read data from r.rowData
+	r:SetScript("OnEnter", function()
+		local td = this.rowData
+		if not td then return end
+		if td.type == "sep" then
+			if not td._ext or td._ext.need1 == 0 then return end
+			local ext = td._ext
+			GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
+			GameTooltip:ClearLines()
+			GameTooltip:AddLine(string.format("|cffddaa44Bracket %d — Slot Info|r", td.bracket), 0.87, 0.67, 0.27)
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddDoubleLine("Players ranked this week:", string.format("%d", td._pool_size), 0.7, 0.7, 0.7, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Open slots in bracket:", string.format("%d", ext.slots), 0.7, 0.7, 0.7, 1, 1, 1)
+			if ext.need1 > 0 then
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				GameTooltip:AddDoubleLine("+1 slot at:", string.format("%d  (+%d more)", ext.pool1, ext.need1), 0.7, 0.7, 0.7, 1, 1, 0.6)
+				if ext.need2 > 0 then
+					GameTooltip:AddDoubleLine("+2 slots at:", string.format("%d  (+%d more)", ext.pool2, ext.need2), 0.7, 0.7, 0.7, 0.6, 0.6, 0.4)
+				end
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				GameTooltip:AddLine("Any player earning honor this week counts.", 0.6, 0.6, 0.6)
+			end
+			GameTooltip:Show()
+			return
+		end
+		local lastWeekBracket = 0
+		if td._standing > 0 then
+			lastWeekBracket = 1
+			for b = 2, 14 do
+				if td._standing > td._brk_abs[b] then break end
+				lastWeekBracket = b
+			end
+		end
+		GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
+		GameTooltip:ClearLines()
+		local cr, cg, cb = BC:GetColor(td._class)
+		GameTooltip:AddLine("     " .. td._name, cr or 1, cg or 1, cb or 1)
+		GameTooltip:AddDoubleLine("Last Week Honor:", string.format("%d", td._lastWeekHonor), 0.7, 0.7, 0.7, 1, 1, 1)
+		GameTooltip:AddDoubleLine("Last Week Standing:", string.format("#%d |cff888888(Bracket %d)|r", td._standing, lastWeekBracket), 0.7, 0.7, 0.7, 1, 1, 1)
+		GameTooltip:AddDoubleLine("Last Seen:", td._last_seen_human, 0.7, 0.7, 0.7, 1, 1, 1)
+		if td._bgZone then
+			GameTooltip:AddDoubleLine("Battleground:", "|cffff4444" .. td._bgZone .. "|r", 0.7, 0.7, 0.7, 1, 0.3, 0.3)
+		elseif td._isOnline then
+			GameTooltip:AddDoubleLine("Status:", "|cff88cc88Online|r", 0.7, 0.7, 0.7, 0.5, 0.8, 0.5)
+		end
+		if td._b14Safety then
+			local players = td._b14_players
+			local nSlots = td._b14_slots or 0
+			local safeTarget = td._b14_safe_target or 0
+
+			-- Find this player's honor
+			local myHonor = 0
+			if players then
+				for pi = 1, nSlots do
+					local p = players[pi]
+					if p and p.name == td._name then
+						myHonor = p.honor
+						break
+					end
+				end
+			end
+			local excess = safeTarget > 0 and (myHonor - safeTarget) or 0
+
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("|cffddaa00-- Bracket 14 Analysis --|r", 0.87, 0.67, 0)
+			GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
+			GameTooltip:AddDoubleLine("Safe target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Excess:",      string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
+			GameTooltip:AddLine("This spreads the RP curve — others earn less.", 0.7, 0.7, 0.7)
+
+			if nSlots >= 1 and players then
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				GameTooltip:AddLine("Current RP awards:", 0.87, 0.73, 0.27)
+				for pi = 1, nSlots do
+					local p = players[pi]
+					if p then
+						local isThis = p.name == td._name
+						GameTooltip:AddDoubleLine(
+							isThis and ("|cffff6666" .. p.name .. "|r") or p.name,
+							isThis and string.format("|cffff6666%d RP|r", p.award) or string.format("|cffaaaaaa%d RP|r", p.award),
+							1, 1, 1, 1, 1, 1
+						)
+					end
+				end
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				GameTooltip:AddLine("If equalized: 13,000 RP each.", 0.27, 0.87, 0.47)
+			end
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("Coordinate on a shared honor target.", 0.87, 0.73, 0.27)
+		end
+		GameTooltip:Show()
+		if td._rank > 0 then
+			ttRankIcon:ClearAllPoints()
+			ttRankIcon:SetPoint("LEFT", GameTooltipTextLeft1, "LEFT", 0, 0)
+			ttRankIcon:SetTexture(string.format("Interface\\PvPRankBadges\\PvPRank%02d", td._rank))
+			ttRankIcon:Show()
+		else
+			ttRankIcon:Hide()
+		end
+	end)
+	r:SetScript("OnLeave", function()
+		ttRankIcon:Hide()
+		GameTooltip:Hide()
+	end)
+
+	return r
+end
+
+-----------------------------------------------------------------------
+-- One-time frame creation
+-----------------------------------------------------------------------
+local function CreateMainFrame()
+	if mainFrame then return end
+
+	mainFrame = CreateFrame("Frame", "HonorSpyStandingsFrame", UIParent)
+	mainFrame:SetWidth(FRAME_W)
+	mainFrame:SetHeight(PAD + HDR_H + 2 + MAX_VISIBLE * ROW_H + PAD)
+	mainFrame:SetBackdrop({
+		bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 16, edgeSize = 16,
+		insets = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+	mainFrame:SetBackdropColor(0, 0, 0, 0.92)
+	mainFrame:SetBackdropBorderColor(0.6, 0.6, 0.6, 0.8)
+	mainFrame:EnableMouse(true)
+	mainFrame:SetMovable(true)
+	mainFrame:SetClampedToScreen(true)
+	mainFrame:SetFrameStrata("MEDIUM")
+	mainFrame:RegisterForDrag("LeftButton")
+	mainFrame:SetScript("OnDragStart", function() mainFrame:StartMoving() end)
+	mainFrame:SetScript("OnDragStop", function()
+		mainFrame:StopMovingOrSizing()
+		local p, _, rp, x, y = mainFrame:GetPoint()
+		if HonorSpy and HonorSpy.db and HonorSpy.db.realm then
+			HonorSpy.db.realm.hs.standingsPos = { point = p, relPoint = rp, x = x, y = y }
+		end
+	end)
+
+	-- close button (positioned outside top-right corner)
+	local cb = CreateFrame("Button", nil, mainFrame, "UIPanelCloseButton")
+	cb:SetPoint("CENTER", mainFrame, "TOPRIGHT", -3, -3)
+	cb:SetScript("OnClick", function() mainFrame:Hide() end)
+
+	-- header row
+	local hdr = CreateFrame("Frame", nil, mainFrame)
+	hdr:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", PAD, -PAD)
+	hdr:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -PAD, -PAD)
+	hdr:SetHeight(HDR_H)
+
+	local function HdrText(col, txt)
+		local fs = hdr:CreateFontString(nil, "OVERLAY", "GameTooltipText")
+		fs:SetPoint("LEFT", hdr, "LEFT", col.x, 0)
+		fs:SetWidth(col.w)
+		fs:SetJustifyH(col.j or "LEFT")
+		fs:SetTextColor(1, 0.65, 0)
+		fs:SetText(txt)
+	end
+	HdrText(C_NAME,  L["Name"])
+	HdrText(C_HONOR, "Honor")
+	HdrText(C_RPAW,  "RP")
+	HdrText(C_TOTRP, "RP")
+	HdrText(C_GAIN,  "Gain")
+	HdrText(C_CRANK, "Rank")
+	HdrText(C_NRANK, "Next")
+	HdrText(C_DIFF,  "")
+
+	-- body area (rows live here, no ScrollFrame)
+	bodyFrame = CreateFrame("Frame", "HSSBody", mainFrame)
+	bodyFrame:SetPoint("TOPLEFT", hdr, "BOTTOMLEFT", 0, -2)
+	bodyFrame:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -PAD, PAD)
+	bodyFrame:EnableMouseWheel(true)
+	bodyFrame:SetScript("OnMouseWheel", OnMouseWheel)
+
+	-- create fixed row pool
+	for vi = 1, MAX_VISIBLE do
+		rows[vi] = CreateRow(vi, bodyFrame)
+	end
+
+	mainFrame:Hide()
+end
+
+local function RestorePosition()
+	if not mainFrame then return end
+	local pos = HonorSpy and HonorSpy.db and HonorSpy.db.realm
+	            and HonorSpy.db.realm.hs and HonorSpy.db.realm.hs.standingsPos
+	if pos and pos.point then
+		mainFrame:ClearAllPoints()
+		mainFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+	else
+		mainFrame:ClearAllPoints()
+		mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	end
+end
+
+-----------------------------------------------------------------------
+-- Public API
+-----------------------------------------------------------------------
 function HonorSpyStandings:OnEnable()
-  if not T:IsRegistered("HonorSpyStandings") then
-    T:Register("HonorSpyStandings",
-      "children", function()
-        T:SetTitle(L["HonorSpy standings"])
-        self:OnTooltipUpdate()
-      end,
-  		"showTitleWhenDetached", false,
-  		"showHintWhenDetached", false,
-  		"cantAttach", true
-    )
-  end
-  if not T:IsAttached("HonorSpyStandings") then
-    T:Open("HonorSpyStandings")
-  end
+	CreateMainFrame()
+	RestorePosition()
+	self:RenderStandings()
+	mainFrame:Hide()
 end
 
 function HonorSpyStandings:OnDisable()
-  T:Close("HonorSpyStandings")
+	if mainFrame then mainFrame:Hide() end
 end
 
 function HonorSpyStandings:Refresh()
-	if (T:IsRegistered("HonorSpyStandings")) then
-		T:Refresh("HonorSpyStandings")
+	if mainFrame and mainFrame:IsShown() then
+		self:RenderStandings()
 	end
 end
 
 function HonorSpyStandings:Toggle()
-  if T:IsAttached("HonorSpyStandings") then
-    T:Detach("HonorSpyStandings")
-    if (T:IsLocked("HonorSpyStandings")) then
-      T:ToggleLocked("HonorSpyStandings")
-    end
-  else
-    T:Attach("HonorSpyStandings")
-  end
+	if not mainFrame then
+		CreateMainFrame()
+		RestorePosition()
+	end
+	if mainFrame:IsShown() then
+		mainFrame:Hide()
+	else
+		self:RenderStandings()
+		mainFrame:Show()
+	end
 end
 
+-----------------------------------------------------------------------
+-- BuildStandingsTable  (unchanged business logic)
+-----------------------------------------------------------------------
 function HonorSpyStandings:BuildStandingsTable()
-  local t = { }
-  -- ADD: Get enemy faction table from parent
-  local eFaction = {}
-  local horde = { Orc=true, Tauren=true, Troll=true, Undead=true, Scourge=true, Goblin=true }
-  local alliance = { Dwarf=true, Gnome=true, Human=true, ["Night Elf"]=true, ["High Elf"]=true, NightElf=true, BloodElf=true, HighElf=true }
-  if alliance[UnitRace("player")] == true then
-    eFaction = horde
-  else
-    eFaction = alliance
-  end
+	local t = {}
+	local eFaction = {}
+	local horde   = { Orc = true, Tauren = true, Troll = true, Undead = true, Scourge = true, Goblin = true }
+	local alliance = { Dwarf = true, Gnome = true, Human = true, ["Night Elf"] = true, ["High Elf"] = true, NightElf = true, BloodElf = true, HighElf = true }
+	if alliance[UnitRace("player")] == true then
+		eFaction = horde
+	else
+		eFaction = alliance
+	end
 
-  for playerName, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
-    -- ADD: Skip enemy faction players
-    if not (player.race and eFaction[player.race]) then
-      table.insert(t, {playerName, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked})
-    end
-  end
-  local sort_column = 3; -- ThisWeekHonor
-  if (HonorSpy.db.realm.hs.sort == L["Rank"]) then sort_column = 6; end
-  table.sort(t, function(a,b)
-    return a[sort_column] > b[sort_column]
-    end)
-  return t
+	for pn, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
+		if not (player.race and eFaction[player.race]) then
+			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked })
+		end
+	end
+	local sort_column = 3
+	if HonorSpy.db.realm.hs.sort == L["Rank"] then sort_column = 6 end
+	table.sort(t, function(a, b) return a[sort_column] > b[sort_column] end)
+	return t
 end
 
+-----------------------------------------------------------------------
+-- BG zones & friend helpers
+-----------------------------------------------------------------------
 local BG_ZONES = {
 	["Warsong Gulch"] = true,
 	["Arathi Basin"] = true,
@@ -92,9 +455,7 @@ local BG_ZONES = {
 }
 
 local function GetOnlineFriends()
-	local online = {}
-	local inBG = {}
-	local allFriends = {}
+	local online, inBG, allFriends = {}, {}, {}
 	ShowFriends()
 	for i = 1, GetNumFriends() do
 		local name, _, _, area, connected = GetFriendInfo(i)
@@ -112,58 +473,44 @@ local function GetOnlineFriends()
 	return online, inBG, allFriends
 end
 
-function HonorSpyStandings:OnTooltipUpdate()
-	local cat = T:AddCategory(
-	  "columns", 10,
-	  "text",  C:Orange(L["Name"]),   "justify",  "LEFT",  "child_justify",  "LEFT",
-	  "text2", "",                    "justify2", "LEFT",  "child_justify2", "LEFT",
-	  "text3", C:Orange("Honor"),     "justify3", "RIGHT", "child_justify3", "RIGHT",
-	  "text4", C:Orange("RP"),        "justify4", "LEFT",  "child_justify4", "LEFT",
-	  "text5", "",                    "justify5", "RIGHT", "child_justify5", "RIGHT",
-	  "text6", C:Orange("RP"),  "justify6", "RIGHT", "child_justify6", "RIGHT",
-	  "text7", C:Orange("Gain"),      "justify7", "LEFT", "child_justify7", "LEFT",
-	  "text8", C:Orange("Rank"),      "justify8", "RIGHT",  "child_justify8", "RIGHT",
-	  "checkIcon5", "Interface\\PvPRankBadges\\PvPRank01", "checkIcon5Alpha", 0,
-	  "text9", C:Orange("Next"),      "justify9", "RIGHT",  "child_justify9", "RIGHT",
-	  "checkIcon6", "Interface\\PvPRankBadges\\PvPRank01", "checkIcon6Alpha", 0,
-	  "text10", C:Orange("Diff"),     "justify10", "RIGHT", "child_justify10", "RIGHT"
-	)
+-----------------------------------------------------------------------
+-- RenderStandings  — builds displayRows[], resets scroll, updates view
+-----------------------------------------------------------------------
+function HonorSpyStandings:RenderStandings()
+	if not mainFrame then return end
+
 	local t = self:BuildStandingsTable()
 	local onlineFriends, bgFriends, allFriends = GetOnlineFriends()
 	local pool_size = table.getn(t)
 
-	-- Bracket boundary percentages (0-indexed, matching vmangos HonorScores BRK[])
-	-- BRK[0]=100%, BRK[1]=84.5%, ..., BRK[13]=0.3%
+	-- Bracket boundary percentages
 	local BRK = {}
-	local brk_pct_0 = {[0]=1, [1]=0.845, [2]=0.697, [3]=0.566, [4]=0.436, [5]=0.327, [6]=0.228, [7]=0.159, [8]=0.100, [9]=0.060, [10]=0.035, [11]=0.020, [12]=0.008, [13]=0.003}
+	local brk_pct_0 = {
+		[0] = 1, [1] = 0.845, [2] = 0.697, [3] = 0.566, [4] = 0.436,
+		[5] = 0.327, [6] = 0.228, [7] = 0.159, [8] = 0.100, [9] = 0.060,
+		[10] = 0.035, [11] = 0.020, [12] = 0.008, [13] = 0.003,
+	}
 	for k = 0, 13 do
 		BRK[k] = math.floor(brk_pct_0[k] * pool_size + 0.5)
 	end
-	-- 1-indexed brk_abs for bracket separator display (brk_abs[k] = BRK[k-1])
 	local brk_abs = {}
-	for k = 1, 14 do
-		brk_abs[k] = BRK[k - 1]
-	end
-	-- RP award curve (FY): fixed RP values at each bracket boundary (0-indexed)
-	local FY = {[0] = 0, [1] = 400}
+	for k = 1, 14 do brk_abs[k] = BRK[k - 1] end
+
+	-- RP award curve
+	local FY = { [0] = 0, [1] = 400 }
 	for k = 2, 13 do FY[k] = (k - 1) * 1000 end
 	FY[14] = 13000
-	local RankThresholds = {0, 2000}
-	for k = 3, 14 do
-		RankThresholds[k] = (k - 2) * 5000
-	end
 
-	-- Helper: get CP of player at standing position (1-based), 0 if not found
+	local RankThresholds = { 0, 2000 }
+	for k = 3, 14 do RankThresholds[k] = (k - 2) * 5000 end
+
 	local function getCP(pos)
-		if pos >= 1 and pos <= pool_size and t[pos] then
-			return t[pos][3] or 0
-		end
+		if pos >= 1 and pos <= pool_size and t[pos] then return t[pos][3] or 0 end
 		return 0
 	end
 
-	-- Build FX array: honor (CP) values at each bracket boundary (0-indexed)
-	-- Matches vmangos GenerateScores(): FX[i] = avg of CP at BRK[i] and BRK[i]+1
-	local FX = {[0] = 0}
+	-- Build FX array
+	local FX = { [0] = 0 }
 	local top = false
 	for i = 1, 13 do
 		local honor = 0
@@ -171,9 +518,7 @@ function HonorSpyStandings:OnTooltipUpdate()
 		if tempHonor > 0 then
 			honor = tempHonor
 			tempHonor = getCP(BRK[i] + 1)
-			if tempHonor > 0 then
-				honor = honor + tempHonor
-			end
+			if tempHonor > 0 then honor = honor + tempHonor end
 		end
 		if honor > 0 then
 			FX[i] = honor / 2
@@ -185,15 +530,12 @@ function HonorSpyStandings:OnTooltipUpdate()
 			end
 		end
 	end
-	-- FX[14] = top scorer honor (only if all 13 boundaries were populated)
 	FX[14] = (not top) and getCP(1) or 0
 
-	-- Honor-based RP interpolation (matches vmangos CalculateRpEarning)
+	-- RP interpolation
 	local function CalcRpEarning(cp)
 		local i = 0
-		while i < 14 and BRK[i] and BRK[i] > 0 and FX[i] <= cp do
-			i = i + 1
-		end
+		while i < 14 and BRK[i] and BRK[i] > 0 and FX[i] <= cp do i = i + 1 end
 		if i > 0 and FX[i] and FX[i] > cp and FX[i - 1] ~= nil and cp >= FX[i - 1] then
 			local denom = FX[i] - FX[i - 1]
 			if denom > 0 then
@@ -203,7 +545,6 @@ function HonorSpyStandings:OnTooltipUpdate()
 		return FY[i] or 0
 	end
 
-	-- Server-accurate decay (matches vmangos CalculateRpDecay)
 	local function CalcRpDecay(rpEarning, oldRp)
 		local decay = math.floor(0.2 * oldRp + 0.5)
 		local delta = rpEarning - decay
@@ -212,92 +553,123 @@ function HonorSpyStandings:OnTooltipUpdate()
 		return oldRp + delta
 	end
 
+	-- B14 safety info
+	local b14_slots = BRK[13]
+	local b14_cutoff_honor = 0
+	local b14_cutoff_name = nil
+	local b14_safe_target = 0
+	if b14_slots >= 1 and b14_slots < pool_size then
+		b14_cutoff_honor = t[b14_slots + 1][3] or 0
+		b14_cutoff_name  = t[b14_slots + 1][1]
+		if b14_cutoff_honor > 0 then
+			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000)
+			b14_safe_target = math.floor(b14_cutoff_honor + safeMargin + 0.5)
+		end
+	end
+
+	-- Slot extension info for every bracket
+	local function bracketExt(bk)
+		local pU = brk_pct_0[bk - 1]
+		local pL = (bk < 14) and brk_pct_0[bk] or 0
+		local cur = math.floor(pU * pool_size + 0.5) - math.floor(pL * pool_size + 0.5)
+		local need1, pool1, need2, pool2
+		for delta = 1, 2000 do
+			local p = pool_size + delta
+			local s = math.floor(pU * p + 0.5) - math.floor(pL * p + 0.5)
+			if s >= cur + 1 and not need1 then need1 = delta; pool1 = p end
+			if s >= cur + 2 and not need2 then need2 = delta; pool2 = p; break end
+		end
+		return { slots = cur, need1 = need1 or 0, pool1 = pool1 or pool_size, need2 = need2 or 0, pool2 = pool2 or pool_size }
+	end
+	local brk_ext = {}
+	for bk = 1, 14 do brk_ext[bk] = bracketExt(bk) end
+
+	-- Collect B14 player names for tooltip
+	local b14_players = {}
+	local b14_avg = 0
+	if b14_slots >= 1 then
+		local honorSum = 0
+		for j = 1, b14_slots do
+			if t[j] then
+				local hon = t[j][3] or 0
+				table.insert(b14_players, {
+					name  = t[j][1],
+					honor = hon,
+					award = math.floor(CalcRpEarning(hon) + 0.5),
+				})
+				honorSum = honorSum + hon
+			end
+		end
+		if b14_slots > 0 then
+			b14_avg = math.floor(honorSum / b14_slots + 0.5)
+		end
+	end
+
+	-- Build displayRows (fresh table each render)
+	displayRows = {}
+
 	local prev_bracket = 0
+	local limit = tonumber(HonorSpy.db.realm.hs.limit) or 0
 
 	for i = 1, table.getn(t) do
 		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(t[i])
 
-		-- Determine bracket for this position (for display separator only)
 		local my_bracket = 1
 		for b = 2, 14 do
-			if (i > brk_abs[b]) then
-				break
-			end
+			if i > brk_abs[b] then break end
 			my_bracket = b
 		end
 
-		-- Insert bracket separator when bracket changes
+		-- Separator
 		if my_bracket ~= prev_bracket then
-			local sepColor = "666644"
-			if prev_bracket == 0 then
-				-- First bracket (14): show subheaders
-				cat:AddLine(
-					"text",  C:Colorize(sepColor, string.format("-- Bracket %d --", my_bracket)),
-					"text2", "",
-					"text3", "",
-					"text4", "",
-					"text5", "",
-					"text6", C:Colorize(sepColor, "Total"),
-					"text7", "",
-					"text8", "",
-					"text9", "",
-					"text10", ""
-				)
-			else
-				cat:AddLine(
-					"text",  C:Colorize(sepColor, string.format("-- Bracket %d --", my_bracket)),
-					"text2", "",
-					"text3", "",
-					"text4", "",
-					"text5", "",
-					"text6", "",
-					"text7", "",
-					"text8", "",
-					"text9", "",
-					"text10", ""
-				)
-			end
+			table.insert(displayRows, {
+				type = "sep",
+				bracket = my_bracket,
+				showTotal = (prev_bracket == 0),
+				_ext = brk_ext[my_bracket],
+				_pool_size = pool_size,
+				-- keep b14-specific fields for the player-row B14 analysis tooltip
+				_b14_slots = (my_bracket == 14) and b14_slots or nil,
+			})
 			prev_bracket = my_bracket
 		end
 
-		local last_seen, last_seen_human = (time() - last_checked), ""
-		if (last_seen/60/60/24 > 1) then
-			last_seen_human = ""..math.floor(last_seen/60/60/24)..L["d"]
-		elseif (last_seen/60/60 > 1) then
-			last_seen_human = ""..math.floor(last_seen/60/60)..L["h"]
-		elseif (last_seen/60 > 1) then
-			last_seen_human = ""..math.floor(last_seen/60)..L["m"]
+		-- Last seen
+		local last_seen = time() - last_checked
+		local last_seen_human
+		if last_seen / 86400 > 1 then
+			last_seen_human = math.floor(last_seen / 86400) .. L["d"]
+		elseif last_seen / 3600 > 1 then
+			last_seen_human = math.floor(last_seen / 3600) .. L["h"]
+		elseif last_seen / 60 > 1 then
+			last_seen_human = math.floor(last_seen / 60) .. L["m"]
 		else
-			last_seen_human = ""..last_seen..L["s"]
+			last_seen_human = last_seen .. L["s"]
 		end
 
+		-- RP calculations
 		local award = CalcRpEarning(thisWeekHonor)
 		local EstRP = math.floor(CalcRpDecay(award, RP) + 0.5)
 		if EstRP < 0 then EstRP = 0 end
-		-- Turtle WoW: no de-ranking — clamp to current rank's minimum RP
 		local minRP = 0
 		if rank >= 3 then minRP = (rank - 2) * 5000
 		elseif rank == 2 then minRP = 2000 end
 		if EstRP < minRP then EstRP = minRP end
+
 		local EstRank = 14
 		for r = 3, 14 do
-			if (EstRP < RankThresholds[r]) then
+			if EstRP < RankThresholds[r] then
 				EstRank = r - 1
 				break
 			end
 		end
+
 		local EstProgress = math.floor((EstRP - math.floor(EstRP / 5000) * 5000) / 5000 * 100)
-		local nextWeekStr = string.format("%d%%", EstProgress)
 		local curProgress = math.floor((RP - math.floor(RP / 5000) * 5000) / 5000 * 100)
-		local curRankStr = string.format("%d%%", curProgress)
-		local rankingUp = EstRank > rank
 		local rankDiff = EstRank - rank
-		local rankUp = ""
-		if rankDiff > 0 then
-			rankUp = " " .. C:Colorize("ddbb44", "+" .. rankDiff)
-		elseif rankDiff < 0 then
-			rankUp = " " .. C:Colorize("ff6666", rankDiff)
-		end
+		local weekRP = EstRP - RP
+
+		local class_color = BC:GetHexColor(class)
 		local curRankColor = "cccccc"
 		local nextRankColor
 		if rankDiff > 0 then
@@ -309,16 +681,8 @@ function HonorSpyStandings:OnTooltipUpdate()
 		else
 			nextRankColor = "ddbb44"
 		end
-
-		local class_color = BC:GetHexColor(class)
-		local weekRP = EstRP - RP
 		local weekRPColor = weekRP >= 0 and "44ddaa" or "ff6666"
-		local weekRPStr = weekRP >= 0 and string.format("+%d", weekRP) or string.format("%d", weekRP)
 
-		local rankIcon = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1)
-		local curRankIcon = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1)
-		local nextRankIcon = string.format("Interface\\PvPRankBadges\\PvPRank%02d", EstRank > 0 and EstRank or 1)
-		local displayName = string.len(name) > 12 and string.sub(name, 1, 12) .. ".." or name
 		local onlineDot = ""
 		if bgFriends[name] then
 			onlineDot = "|cffff4444o|r"
@@ -327,64 +691,76 @@ function HonorSpyStandings:OnTooltipUpdate()
 		elseif allFriends[name] then
 			onlineDot = "|cff333333o|r"
 		end
-		cat:AddLine(
-			"text", C:Colorize("444444", i).." "..C:Colorize(class_color, displayName),
-			"hasCheck", true,
-			"checkIcon", rankIcon,
-			"checked", true,
-			"text2", onlineDot,
-			"text3", C:Colorize(class_color, string.format("%d", thisWeekHonor)),
-			"text4", C:Colorize("ddbb44", string.format("%d", math.floor(award + 0.5))),
-			"text5", "",
-			"text6", C:Colorize(class_color, string.format("%d", RP)),
-			"text7", C:Colorize(weekRPColor, weekRPStr),
-			"text8", C:Colorize(curRankColor, curRankStr),
-			"checkIcon5", curRankIcon,
-			"checkIcon5Alpha", rank > 0 and 1 or 0,
-			"text9", C:Colorize(nextRankColor, nextWeekStr),
-			"checkIcon6", nextRankIcon,
-			"checkIcon6Alpha", EstRank > 0 and 1 or 0,
-			"text10", rankDiff > 0 and C:Colorize("ddbb44", "+" .. rankDiff) or (rankDiff < 0 and C:Colorize("ff6666", tostring(rankDiff)) or ""),
-			"onEnterFunc", function()
-				local lastWeekBracket = 0
-				if standing > 0 then
-					lastWeekBracket = 1
-					for b = 2, 14 do
-						if standing > brk_abs[b] then break end
-						lastWeekBracket = b
-					end
-				end
-				GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
-				GameTooltip:ClearLines()
-				local cr, cg, cb = BC:GetColor(class)
-				GameTooltip:AddLine("     " .. name, cr or 1, cg or 1, cb or 1)
-				GameTooltip:AddDoubleLine("Last Week Honor:", string.format("%d", lastWeekHonor), 0.7, 0.7, 0.7, 1, 1, 1)
-				GameTooltip:AddDoubleLine("Last Week Standing:", string.format("#%d |cff888888(Bracket %d)|r", standing, lastWeekBracket), 0.7, 0.7, 0.7, 1, 1, 1)
-				GameTooltip:AddDoubleLine("Last Seen:", last_seen_human, 0.7, 0.7, 0.7, 1, 1, 1)
-				if bgFriends[name] then
-					GameTooltip:AddDoubleLine("Battleground:", "|cffff4444" .. bgFriends[name] .. "|r", 0.7, 0.7, 0.7, 1, 0.3, 0.3)
-				elseif onlineFriends[name] then
-					GameTooltip:AddDoubleLine("Status:", "|cff88cc88Online|r", 0.7, 0.7, 0.7, 0.5, 0.8, 0.5)
-				end
-				GameTooltip:Show()
-				if rank > 0 then
-					ttRankIcon:ClearAllPoints()
-					ttRankIcon:SetPoint("LEFT", GameTooltipTextLeft1, "LEFT", 0, 0)
-					ttRankIcon:SetTexture(string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank))
-					ttRankIcon:Show()
-				else
-					ttRankIcon:Hide()
-				end
-			end,
-			"onLeaveFunc", function()
-				ttRankIcon:Hide()
-				GameTooltip:Hide()
-			end
-		)
 
-		if (tonumber(HonorSpy.db.realm.hs.limit) > 0 and i == tonumber(HonorSpy.db.realm.hs.limit)) then
-			break
+		local b14Safety, b14Buffer, b14BufferPct = nil, 0, 0
+		if my_bracket == 14 and b14_slots >= 1 and b14_cutoff_honor > 0 then
+			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000)
+			b14Buffer = thisWeekHonor - b14_cutoff_honor
+			b14BufferPct = b14_cutoff_honor > 0 and (b14Buffer / b14_cutoff_honor * 100) or 0
+			if b14Buffer > safeMargin then
+				b14Safety = "over"
+			end
 		end
+
+		local honorColor = class_color
+		if b14Safety == "over" then
+			honorColor = "ff4444"
+		end
+
+		local displayName = string.len(name) > 12 and string.sub(name, 1, 12) .. ".." or name
+
+		table.insert(displayRows, {
+			type = "player",
+			index = i,
+			_my_bracket = my_bracket,
+			nameText   = C:Colorize("444444", i) .. " " .. C:Colorize(class_color, displayName),
+			statusText = onlineDot,
+			honorText  = C:Colorize(honorColor, string.format("%d", thisWeekHonor)),
+			rpAwText   = C:Colorize("ddbb44", string.format("%d", math.floor(award + 0.5))),
+			totRPText  = C:Colorize(class_color, string.format("%d", RP)),
+			gainText   = C:Colorize(weekRPColor, weekRP >= 0 and string.format("+%d", weekRP) or string.format("%d", weekRP)),
+			cRankText  = C:Colorize(curRankColor, string.format("%d%%", curProgress)),
+			nRankText  = C:Colorize(nextRankColor, string.format("%d%%", EstProgress)),
+			diffText   = rankDiff > 0 and C:Colorize("ddbb44", "+" .. rankDiff)
+			             or (rankDiff < 0 and C:Colorize("ff6666", tostring(rankDiff)) or ""),
+			rankIconPath   = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
+			rankIconAlpha  = rank > 0 and 1 or 0,
+			cRankIconPath  = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
+			cRankIconAlpha = rank > 0 and 1 or 0,
+			nRankIconPath  = string.format("Interface\\PvPRankBadges\\PvPRank%02d", EstRank > 0 and EstRank or 1),
+			nRankIconAlpha = EstRank > 0 and 1 or 0,
+			_name = name,
+			_class = class,
+			_rank = rank,
+			_lastWeekHonor = lastWeekHonor,
+			_standing = standing,
+			_last_seen_human = last_seen_human,
+			_bgZone = bgFriends[name],
+			_isOnline = onlineFriends[name],
+			_b14Safety = b14Safety,
+			_b14Buffer = b14Buffer,
+			_b14BufferPct = b14BufferPct,
+			_b14_cutoff_name = b14_cutoff_name,
+			_b14_cutoff_honor = b14_cutoff_honor,
+			_b14_safe_target = b14_safe_target,
+			_b14_players = b14_players,
+			_b14_avg = b14_avg,
+			_b14_slots = b14_slots,
+			_b14_slots_needed = b14_slots_needed,
+			_b14_next_pool = b14_next_pool,
+			_brk_abs = brk_abs,
+		})
+
+		if limit > 0 and i == limit then break end
 	end
+
+	-- Size frame to content (up to MAX_VISIBLE)
+	local totalRows = table.getn(displayRows)
+	local visibleRows = math.min(totalRows, MAX_VISIBLE)
+	mainFrame:SetHeight(PAD + HDR_H + 2 + visibleRows * ROW_H + PAD)
+
+	-- Reset scroll & draw
+	scrollOffset = 0
+	UpdateVisibleRows()
 end
 
