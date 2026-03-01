@@ -24,7 +24,7 @@ function HonorSpy:ExportCSV()
 		
 		local editBox = CreateFrame("EditBox", "ARLCopyEdit", frame)
 		editBox:SetMultiLine(true)
-		editBox:SetMaxLetters(99999)
+		editBox:SetMaxLetters(0)
 		editBox:EnableMouse(true)
 		editBox:SetAutoFocus(false)
 		editBox:SetFontObject(ChatFontNormal)
@@ -109,16 +109,23 @@ function HonorSpy:ExportCSV()
 		return oldRp + delta
 	end
 
-	-- Header
-	editbox:Insert("Standing,Name,Class,ThisWeekHonor,LastWeekHonor,OldStanding,RP,Rank,Bracket,RPEarning,EstRP,WeekRP,EstRank,EstProgress,LastChecked\n")
+	-- Build CSV into a table for fast concatenation
+	local lines = {}
+	tinsert(lines, "Standing,Name,Class,ThisWeekHonor,LastWeekHonor,OldStanding,RP,Rank,Bracket,RPEarning,EstRP,WeekRP,EstRank,EstProgress,LastChecked")
 
 	for i, row in ipairs(data) do
 		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(row)
+		thisWeekHonor = thisWeekHonor or 0
+		lastWeekHonor = lastWeekHonor or 0
+		standing = standing or 0
+		RP = RP or 0
+		rank = rank or 0
+		last_checked = last_checked or 0
 
 		-- Determine bracket
 		local my_bracket = 1
 		for b = 2, 14 do
-			if (i > BRK[b - 1]) then break end
+			if not BRK[b - 1] or (i > BRK[b - 1]) then break end
 			my_bracket = b
 		end
 
@@ -126,6 +133,7 @@ function HonorSpy:ExportCSV()
 		local EstRP = math.floor(CalcRpDecay(award, RP) + 0.5)
 		if EstRP < 0 then EstRP = 0 end
 		-- Turtle WoW: no de-ranking — clamp to current rank's minimum RP
+		if rank < 0 or rank > 14 then rank = 0 end  -- guard corrupted rank
 		local minRP = 0
 		if rank >= 3 then minRP = (rank - 2) * 5000
 		elseif rank == 2 then minRP = 2000 end
@@ -142,15 +150,16 @@ function HonorSpy:ExportCSV()
 
 		local lastCheckedStr = date("!%x %X", last_checked)
 
-		local line = string.format("%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s\n",
+		local line = string.format("%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
 			i, name, class or "",
 			thisWeekHonor, lastWeekHonor, standing,
 			RP, rank, my_bracket,
 			math.floor(award + 0.5), EstRP, weekRP,
 			EstRank, EstProgress, lastCheckedStr)
-		editbox:Insert(line)
+		tinsert(lines, line)
 	end
 
+	editbox:SetText(table.concat(lines, "\n"))
 	editbox:HighlightText(0)
 	exportwindow:Show()
 end

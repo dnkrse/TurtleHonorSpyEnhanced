@@ -102,7 +102,7 @@ frame:SetScript("OnUpdate", function()
 	end
 end)
 
--- Debug slash command: /hsver test | reset | overshoot | clear | honor N | honor reset
+-- Debug slash command: /hsver test | reset | overshoot | clear | honor N | honor reset | debug
 SLASH_HSVER1 = "/hsver"
 SlashCmdList["HSVER"] = function(msg)
 	msg = string.lower(msg or "")
@@ -151,6 +151,8 @@ SlashCmdList["HSVER"] = function(msg)
 			overlay:SetHeight(150)
 			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Overshoot warning cleared.", 1, 0.82, 0)
 		end
+	elseif msg == "debug" then
+		HonorSpy:ToggleDebugMenu()
 	else
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r v" .. MY_VERSION, 1, 0.82, 0)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver test — simulate update available", 0.7, 0.7, 0.7)
@@ -159,5 +161,6 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver clear — clear overshoot warning", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor 250000 — override your honor value", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor reset — clear honor override", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug — toggle debug menu in right-click dropdown", 0.7, 0.7, 0.7)
 	end
 end

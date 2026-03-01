@@ -613,6 +613,12 @@ function HonorSpyStandings:RenderStandings()
 
 	for i = 1, table.getn(t) do
 		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(t[i])
+		thisWeekHonor = thisWeekHonor or 0
+		lastWeekHonor = lastWeekHonor or 0
+		standing = standing or 0
+		RP = RP or 0
+		rank = rank or 0
+		last_checked = last_checked or 0
 
 		local my_bracket = 1
 		for b = 2, 14 do
@@ -651,6 +657,7 @@ function HonorSpyStandings:RenderStandings()
 		local award = CalcRpEarning(thisWeekHonor)
 		local EstRP = math.floor(CalcRpDecay(award, RP) + 0.5)
 		if EstRP < 0 then EstRP = 0 end
+		if rank < 0 or rank > 14 then rank = 0 end  -- guard corrupted rank
 		local minRP = 0
 		if rank >= 3 then minRP = (rank - 2) * 5000
 		elseif rank == 2 then minRP = 2000 end

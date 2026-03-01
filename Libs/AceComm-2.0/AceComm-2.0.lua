@@ -973,7 +973,7 @@ do
 				local value, m = _Deserialize(value, l + 1, hashToText)
 				if not m then break end  -- fault tolerance: abort on corrupt value
 				curr = m
-				if key ~= nil then t[key] = value end
+				if key ~= nil and key == key then t[key] = value end  -- key==key filters NaN
 			end
 			if type(t.n) ~= "number" then
 				local i = 1

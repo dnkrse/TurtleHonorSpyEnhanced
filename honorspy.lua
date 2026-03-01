@@ -12,17 +12,24 @@ HonorSpy:RegisterDefaults('realm', {
 })
 
 -- put this near the top of honorspy.lua
+local function safe_num(v)
+  local n = tonumber(v) or 0
+  if n ~= n then return 0 end  -- NaN guard (NaN ~= NaN)
+  return n
+end
+
 local function sanitize_player_for_comm(p)
   if type(p) ~= "table" then return nil end
   local out = {}
   -- copy only primitives we expect to share
-  out.last_checked   = tonumber(p.last_checked) or 0
-  out.thisWeekHonor  = tonumber(p.thisWeekHonor) or 0
-  out.lastWeekHonor  = tonumber(p.lastWeekHonor) or 0
-  out.standing       = tonumber(p.standing) or 0
-  out.rank           = tonumber(p.rank) or 0
-  out.rankProgress   = tonumber(p.rankProgress) or 0
-  out.RP             = tonumber(p.RP) or 0
+  out.last_checked   = safe_num(p.last_checked)
+  out.thisWeekHonor  = safe_num(p.thisWeekHonor)
+  out.lastWeekHonor  = safe_num(p.lastWeekHonor)
+  out.standing       = safe_num(p.standing)
+  out.rank           = safe_num(p.rank)
+  if out.rank < 0 or out.rank > 14 then out.rank = 0 end
+  out.rankProgress   = safe_num(p.rankProgress)
+  out.RP             = safe_num(p.RP)
   out.class          = type(p.class) == "string" and p.class or nil
   out.race           = type(p.race)  == "string" and p.race  or nil  -- REQUIRED for faction filtering
   return out
@@ -34,10 +41,29 @@ HonorSpy:SetCommPrefix(commPrefix)
 -- Debug flag: when true, AceComm-2.0 will print raw chunk bytes and decode failures to chat.
 -- Toggle with the "Comm Debug" checkbox in the HonorSpy menu, or set HonorSpyCommDebug = true in-game.
 HonorSpyCommDebug = false
+-- Controls whether the Debug menu group is visible (toggled via /hsver)
+local debugMenuEnabled = false
 -- Storage for failed chunks (populated by AceComm-2.0 when HonorSpyCommDebug = true)
 HonorSpy_FailedChunks = {}
 -- Temporary slot used by AceComm-2.0 HandleMessage to pass context into Deserialize's error handler
 HonorSpy_PendingChunk = nil
+
+-- Debug-aware send wrapper: logs outgoing data to chat when HonorSpyCommDebug is enabled
+local function debugSend(self, dist, pName, data)
+	if HonorSpyCommDebug then
+		local fields = ""
+		if type(data) == "table" then
+			fields = "honor=" .. tostring(data.thisWeekHonor)
+				.. " rank=" .. tostring(data.rank)
+				.. " RP=" .. tostring(data.RP)
+				.. " class=" .. tostring(data.class)
+				.. " race=" .. tostring(data.race)
+				.. " checked=" .. tostring(data.last_checked)
+		end
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ccff[HonorSpy SEND]|r " .. dist .. " -> |cffffffff" .. tostring(pName) .. "|r " .. fields)
+	end
+	self:SendCommMessage(dist, pName, data)
+end
 
 local paused = false; -- pause all inspections when user opens inspect frame
 local playerName = UnitName("player");
@@ -154,8 +180,8 @@ function HonorSpy:INSPECT_HONOR_UPDATE()
 		-- share with group/guild
 		local to_send = sanitize_player_for_comm(player)
 		if to_send then
-			self:SendCommMessage("GROUP", inspectedPlayerName, to_send)
-			self:SendCommMessage("GUILD", inspectedPlayerName, to_send)
+			debugSend(self, "GROUP", inspectedPlayerName, to_send)
+			debugSend(self, "GUILD", inspectedPlayerName, to_send)
 		end
 	end
 	inspectedPlayers[inspectedPlayerName] = {last_checked = player.last_checked};
@@ -181,6 +207,60 @@ function checkNeedReset()
 	if (diff_in_seconds > 0) then -- it is negative on reset_day untill midnight
 		local must_reset_on = time()-diff_in_seconds;
 		if (must_reset_on > HonorSpy.db.realm.hs.last_reset) then resetWeek(must_reset_on) end
+	end
+end
+
+-- Heal NaN-poisoned entries in SavedVariables on login
+function healNaNData()
+	local standings = HonorSpy.db.realm.hs.currentStandings
+	local healed = 0
+	local removed = 0
+	for name, player in pairs(standings) do
+		if type(player) == "table" then
+			local dominated = false
+			-- Fix NaN fields first
+			for k, v in pairs(player) do
+				if type(v) == "number" and v ~= v then
+					player[k] = 0
+					healed = healed + 1
+				end
+			end
+			-- Remove entries with epoch-zero dates (last_checked == 0 or very small)
+			local lc = tonumber(player.last_checked) or 0
+			if lc < 1000000000 then dominated = true end  -- before ~2001 = corrupt
+			-- Remove entries with negative honor
+			local twh = tonumber(player.thisWeekHonor) or 0
+			if twh < 0 then dominated = true end
+			-- Clamp rank to 0-14
+			local r = tonumber(player.rank) or 0
+			if r < 0 or r > 14 then player.rank = 0; r = 0 end
+			-- Clamp RP to 0-60000
+			local rp = tonumber(player.RP) or 0
+			if rp < 0 or rp > 60000 then player.RP = math.max(0, math.min(60000, rp)); rp = player.RP end
+			-- Fix RP>0 but Rank=0: compute rank from RP (deterministic)
+			if rp > 0 and r == 0 then
+				local computed = 14
+				for rank = 3, 14 do
+					if rp < (rank - 2) * 5000 then computed = rank - 1; break end
+				end
+				if rp < 2000 then computed = 1
+				elseif rp < 5000 then computed = 2 end
+				player.rank = computed
+				healed = healed + 1
+			end
+			-- Discard entries with Rank>1 but RP=0 (unrecoverable)
+			if r > 1 and rp == 0 then dominated = true end
+			-- Remove hopelessly corrupt entries
+			if dominated then
+				standings[name] = nil
+				removed = removed + 1
+			end
+		end
+	end
+	if healed > 0 or removed > 0 then
+		HonorSpy:Print("|cff00ff00Database healed: " .. healed .. " field(s) fixed, " .. removed .. " corrupt entry(ies) removed.|r")
+	else
+		HonorSpy:Print("|cff00ff00Database is clean, no issues found.|r")
 	end
 end
 
@@ -252,6 +332,13 @@ local options = {
 }
 HonorSpy:RegisterChatCommand({"/honorspy", "/hs"}, options)
 
+-- Called from /hsver debug (registered in versioncheck.lua)
+function HonorSpy:ToggleDebugMenu()
+	debugMenuEnabled = not debugMenuEnabled
+	self.OnMenuRequest = BuildMenu()
+	DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Debug menu " .. (debugMenuEnabled and "|cff00ff00shown|r" or "|cffff4444hidden|r"), 1, 0.82, 0)
+end
+
 -- MINIMAP
 local MINIMAP_ICON = "Interface\\Icons\\Inv_Misc_Bomb_04"
 local minimapButton
@@ -300,7 +387,9 @@ function HonorSpy:PLAYER_ENTERING_WORLD()
 
 	minimapButton:SetScript("OnClick", function()
 		checkNeedReset()
-		if IsShiftKeyDown() then
+		if IsControlKeyDown() then
+			HonorSpy:ToggleDebugMenu()
+		elseif IsShiftKeyDown() then
 			if HonorSpyStandings and HonorSpyStandings.Toggle then
 				HonorSpyStandings:Toggle()
 			end
@@ -343,6 +432,7 @@ function HonorSpy:PLAYER_ENTERING_WORLD()
 		GameTooltip:AddLine("TurtleHonorSpyEnhanced")
 		GameTooltip:AddLine("Left-click: Toggle Overlay", 1, 1, 1)
 		GameTooltip:AddLine("Shift+click: Toggle Standings Table", 1, 1, 1)
+		GameTooltip:AddLine("Ctrl+click: Toggle Debug Menu", 1, 1, 1)
 		GameTooltip:AddLine("Right-click: Menu", 1, 1, 1)
 		GameTooltip:Show()
 	end)
@@ -453,11 +543,31 @@ function BuildMenu()
 				order = 3,
 				func = function() purgeData() end,
 			},
+		},
+	}
+
+	-- 4. Export
+	options.args["export"] = {
+		type = "execute",
+		name = L["Export to CSV"],
+		desc = L["Show window with current data in CSV format"],
+		order = 6,
+		func = function() HonorSpy:ExportCSV() end,
+	}
+
+	-- 5. Debug (only visible after /hsver debug)
+	if debugMenuEnabled then
+	options.args["debug"] = {
+		type = "group",
+		name = "Debug",
+		desc = "Debug tools for diagnosing comm issues",
+		order = 7,
+		args = {
 			comm_debug = {
 				type = "toggle",
 				name = "Comm Debug",
 				desc = "Log raw AceComm chunks to chat to help diagnose corrupted message errors. Disable when not needed.",
-				order = 4,
+				order = 1,
 				get = function() return HonorSpyCommDebug end,
 				set = function(v)
 					HonorSpyCommDebug = v
@@ -472,20 +582,19 @@ function BuildMenu()
 				type = "execute",
 				name = "Dump Comm Failures",
 				desc = "Open export window showing full hex of all recorded failed comm chunks (enable Comm Debug first)",
-				order = 5,
+				order = 2,
 				func = function() HonorSpy:DumpCommFailures() end,
+			},
+			heal_database = {
+				type = "execute",
+				name = "Heal Database",
+				desc = "Fix NaN fields, remove entries with corrupt timestamps or negative honor, clamp rank/RP to valid ranges.",
+				order = 3,
+				func = function() healNaNData() end,
 			},
 		},
 	}
-
-	-- 4. Export
-	options.args["export"] = {
-		type = "execute",
-		name = L["Export to CSV"],
-		desc = L["Show window with current data in CSV format"],
-		order = 6,
-		func = function() HonorSpy:ExportCSV() end,
-	}
+	end -- debugMenuEnabled
 
 	return options
 end
@@ -579,6 +688,30 @@ function store_player(playerName, player)
   local pcopy = table.copy(player)
   pcopy.unitID = nil       -- junk from old clients ("mouseover"/"target")
   pcopy.is_outdated = nil  -- unused field from old clients
+  -- Scrub NaN values (NaN is the only value where x ~= x)
+  for k, v in pairs(pcopy) do
+    if type(v) == "number" and v ~= v then return end  -- any NaN = corrupted, discard
+  end
+  -- Discard entries with out-of-range values (multi-chunk corruption)
+  if type(pcopy.rank) ~= "number" or pcopy.rank < 0 or pcopy.rank > 14 then return end
+  if type(pcopy.RP) ~= "number" or pcopy.RP < 0 or pcopy.RP > 60000 then return end
+  if pcopy.thisWeekHonor < 0 or pcopy.lastWeekHonor and pcopy.lastWeekHonor < 0 then return end
+  if type(pcopy.rankProgress) == "number" and (pcopy.rankProgress < 0 or pcopy.rankProgress > 1) then return end
+  if type(pcopy.standing) == "number" and pcopy.standing < 0 then return end
+  -- Fix RP>0 but Rank=0: compute rank from RP (other players may send unhealed data)
+  -- Bump timestamp by 1s so the healed version propagates through the network
+  if pcopy.RP > 0 and pcopy.rank == 0 then
+    local computed = 14
+    for rank = 3, 14 do
+      if pcopy.RP < (rank - 2) * 5000 then computed = rank - 1; break end
+    end
+    if pcopy.RP < 2000 then computed = 1
+    elseif pcopy.RP < 5000 then computed = 2 end
+    pcopy.rank = computed
+    pcopy.last_checked = pcopy.last_checked + 1
+  end
+  -- Discard Rank>1 but RP=0 (unrecoverable, don't let it overwrite good local data)
+  if pcopy.rank > 1 and pcopy.RP == 0 then return end
   local localPlayer = HonorSpy.db.realm.hs.currentStandings[playerName]
   if localPlayer == nil or (type(localPlayer.last_checked) == "number" and localPlayer.last_checked < pcopy.last_checked) then
     HonorSpy.db.realm.hs.currentStandings[playerName] = pcopy
@@ -610,8 +743,8 @@ function HonorSpy:PLAYER_DEAD()
 	for pName, player in pairs(self.db.realm.hs.currentStandings) do
 		local to_send = sanitize_player_for_comm(player)
 		if to_send then
-			self:SendCommMessage("GROUP", pName, to_send)
-			self:SendCommMessage("GUILD", pName, to_send)
+			debugSend(self, "GROUP", pName, to_send)
+			debugSend(self, "GUILD", pName, to_send)
 		end
 	end
 end
