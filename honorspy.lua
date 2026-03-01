@@ -250,6 +250,10 @@ function healNaNData()
 			end
 			-- Discard entries with Rank>1 but RP=0 (unrecoverable)
 			if r > 1 and rp == 0 then dominated = true end
+			-- Remove entries without a race (can't verify faction)
+			if type(player.race) ~= "string" or player.race == "" then dominated = true end
+			-- Remove entries with zero ThisWeekHonor (shouldn't be in standings)
+			if type(player.thisWeekHonor) ~= "number" or player.thisWeekHonor <= 0 then dominated = true end
 			-- Remove hopelessly corrupt entries
 			if dominated then
 				standings[name] = nil
@@ -673,9 +677,14 @@ function store_player(playerName, player)
   -- Required fields must be the right types
   if type(player.last_checked) ~= "number" then return end
   if type(player.thisWeekHonor) ~= "number" then return end
-  -- Accept entries without race (old HonorSpyTurtle clients don't send it),
-  -- but still reject known enemy-faction entries from enhanced clients.
+  -- Faction filtering: reject known enemy-faction entries
   if player.race ~= nil and eFaction[player.race] then return end
+  -- If race is missing (old client), only allow updates to already-known players
+  -- whose faction was previously validated. Reject unknown players without race.
+  if player.race == nil then
+    local existing = HonorSpy.db.realm.hs.currentStandings[playerName]
+    if existing == nil or existing.race == nil then return end
+  end
 
   -- Sanity on time window
   if player.last_checked < HonorSpy.db.realm.hs.last_reset or player.last_checked > time() then

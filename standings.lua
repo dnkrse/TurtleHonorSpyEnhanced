@@ -221,6 +221,9 @@ local function CreateRow(vi, parent)
 		GameTooltip:ClearLines()
 		local cr, cg, cb = BC:GetColor(td._class)
 		GameTooltip:AddLine("     " .. td._name, cr or 1, cg or 1, cb or 1)
+		if td._race then
+			GameTooltip:AddDoubleLine("Race:", td._race, 0.7, 0.7, 0.7, 1, 1, 1)
+		end
 		GameTooltip:AddDoubleLine("Last Week Honor:", string.format("%d", td._lastWeekHonor), 0.7, 0.7, 0.7, 1, 1, 1)
 		GameTooltip:AddDoubleLine("Last Week Standing:", string.format("#%d |cff888888(Bracket %d)|r", td._standing, lastWeekBracket), 0.7, 0.7, 0.7, 1, 1, 1)
 		GameTooltip:AddDoubleLine("Last Seen:", td._last_seen_human, 0.7, 0.7, 0.7, 1, 1, 1)
@@ -428,7 +431,7 @@ function HonorSpyStandings:BuildStandingsTable()
 
 	for pn, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
 		if not (player.race and eFaction[player.race]) then
-			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked })
+			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked, player.race })
 		end
 	end
 	local sort_column = 3
@@ -612,7 +615,7 @@ function HonorSpyStandings:RenderStandings()
 	local limit = tonumber(HonorSpy.db.realm.hs.limit) or 0
 
 	for i = 1, table.getn(t) do
-		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(t[i])
+		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked, race = unpack(t[i])
 		thisWeekHonor = thisWeekHonor or 0
 		lastWeekHonor = lastWeekHonor or 0
 		standing = standing or 0
@@ -738,6 +741,7 @@ function HonorSpyStandings:RenderStandings()
 			nRankIconAlpha = EstRank > 0 and 1 or 0,
 			_name = name,
 			_class = class,
+			_race = race,
 			_rank = rank,
 			_lastWeekHonor = lastWeekHonor,
 			_standing = standing,

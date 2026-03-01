@@ -111,10 +111,10 @@ function HonorSpy:ExportCSV()
 
 	-- Build CSV into a table for fast concatenation
 	local lines = {}
-	tinsert(lines, "Standing,Name,Class,ThisWeekHonor,LastWeekHonor,OldStanding,RP,Rank,Bracket,RPEarning,EstRP,WeekRP,EstRank,EstProgress,LastChecked")
+	tinsert(lines, "Standing,Name,Race,Class,ThisWeekHonor,LastWeekHonor,OldStanding,RP,Rank,Bracket,RPEarning,EstRP,WeekRP,EstRank,EstProgress,LastChecked")
 
 	for i, row in ipairs(data) do
-		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked = unpack(row)
+		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked, race = unpack(row)
 		thisWeekHonor = thisWeekHonor or 0
 		lastWeekHonor = lastWeekHonor or 0
 		standing = standing or 0
@@ -150,8 +150,8 @@ function HonorSpy:ExportCSV()
 
 		local lastCheckedStr = date("!%x %X", last_checked)
 
-		local line = string.format("%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
-			i, name, class or "",
+		local line = string.format("%d,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+			i, name, race or "", class or "",
 			thisWeekHonor, lastWeekHonor, standing,
 			RP, rank, my_bracket,
 			math.floor(award + 0.5), EstRP, weekRP,
