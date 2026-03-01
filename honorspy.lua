@@ -31,6 +31,14 @@ end
 local commPrefix = "HonorSpy"
 HonorSpy:SetCommPrefix(commPrefix)
 
+-- Debug flag: when true, AceComm-2.0 will print raw chunk bytes and decode failures to chat.
+-- Toggle with the "Comm Debug" checkbox in the HonorSpy menu, or set HonorSpyCommDebug = true in-game.
+HonorSpyCommDebug = false
+-- Storage for failed chunks (populated by AceComm-2.0 when HonorSpyCommDebug = true)
+HonorSpy_FailedChunks = {}
+-- Temporary slot used by AceComm-2.0 HandleMessage to pass context into Deserialize's error handler
+HonorSpy_PendingChunk = nil
+
 local paused = false; -- pause all inspections when user opens inspect frame
 local playerName = UnitName("player");
 local horde = { Orc=true, Tauren=true, Troll=true, Undead=true, Scourge=true, Goblin=true } --horde if more races are added in the future, just add them here 
@@ -392,7 +400,7 @@ function BuildMenu()
 	}
 	options.args["sep1"] = {
 		type = "header",
-		name = "",
+		name = " ",
 		order = 4,
 	}
 	--[[ display group removed; sort option preserved below if needed
@@ -445,6 +453,28 @@ function BuildMenu()
 				order = 3,
 				func = function() purgeData() end,
 			},
+			comm_debug = {
+				type = "toggle",
+				name = "Comm Debug",
+				desc = "Log raw AceComm chunks to chat to help diagnose corrupted message errors. Disable when not needed.",
+				order = 4,
+				get = function() return HonorSpyCommDebug end,
+				set = function(v)
+					HonorSpyCommDebug = v
+					if v then
+						HonorSpy_FailedChunks = {}
+						table.setn(HonorSpy_FailedChunks, 0)
+					end
+					HonorSpy:Print("Comm debug " .. (v and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. " - " .. (v and "raw chunks will be printed to chat." or "logging stopped."))
+				end,
+			},
+			dump_failures = {
+				type = "execute",
+				name = "Dump Comm Failures",
+				desc = "Open export window showing full hex of all recorded failed comm chunks (enable Comm Debug first)",
+				order = 5,
+				func = function() HonorSpy:DumpCommFailures() end,
+			},
 		},
 	}
 
@@ -458,6 +488,64 @@ function BuildMenu()
 	}
 
 	return options
+end
+
+-- Dump all recorded AceComm deserialization failures into the export window.
+-- Enable Comm Debug in the HonorSpy settings first, then trigger the error, then call this.
+function HonorSpy:DumpCommFailures()
+	local _G = getfenv(0)
+	local n = HonorSpy_FailedChunks and table.getn(HonorSpy_FailedChunks) or 0
+	if n == 0 then
+		self:Print("|cffff9900No comm failures recorded.|r Enable |cff00ff00Comm Debug|r in Settings, reproduce the error, then come back here.")
+		return
+	end
+
+	local lines = {}
+	for i = 1, n do
+		local f = HonorSpy_FailedChunks[i]
+		lines[i] = "=== Failure #" .. i .. " ===\n" ..
+			"Sender : " .. tostring(f.sender) .. "\n" ..
+			"Prefix : " .. tostring(f.prefix) .. "\n" ..
+			"Len    : " .. tostring(f.len) .. " bytes\n" ..
+			"Error  : " .. tostring(f.err) .. "\n" ..
+			"Hex    : " .. tostring(f.hex)
+	end
+	local text = table.concat(lines, "\n\n")
+
+	local PaneBackdrop = {
+		bgFile = [[Interface\DialogFrame\UI-DialogBox-Background]],
+		edgeFile = [[Interface\DialogFrame\UI-DialogBox-Border]],
+		tile = true, tileSize = 16, edgeSize = 16,
+		insets = { left = 3, right = 3, top = 5, bottom = 3 }
+	}
+	if not _G["ARLCopyFrame"] then
+		local frame = CreateFrame("Frame", "ARLCopyFrame", UIParent)
+		tinsert(UISpecialFrames, "ARLCopyFrame")
+		frame:SetBackdrop(PaneBackdrop)
+		frame:SetBackdropColor(0,0,0,1)
+		frame:SetWidth(500)
+		frame:SetHeight(400)
+		frame:SetPoint("CENTER", UIParent, "CENTER")
+		frame:SetFrameStrata("DIALOG")
+		local scrollArea = CreateFrame("ScrollFrame", "ARLCopyScroll", frame, "UIPanelScrollFrameTemplate")
+		scrollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -30)
+		scrollArea:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 8)
+		local editBox = CreateFrame("EditBox", "ARLCopyEdit", frame)
+		editBox:SetMultiLine(true)
+		editBox:SetMaxLetters(99999)
+		editBox:EnableMouse(true)
+		editBox:SetAutoFocus(false)
+		editBox:SetFontObject(ChatFontNormal)
+		editBox:SetWidth(400)
+		editBox:SetHeight(270)
+		editBox:SetScript("OnEscapePressed", function() frame:Hide() end)
+		scrollArea:SetScrollChild(editBox)
+		local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+		close:SetPoint("TOPRIGHT", frame, "TOPRIGHT")
+	end
+	_G["ARLCopyEdit"]:SetText(text)
+	_G["ARLCopyFrame"]:Show()
+	self:Print("Showing " .. n .. " failure(s). Select-all and copy from the window to share.")
 end
 
 -- SYNCING --
@@ -476,8 +564,9 @@ function store_player(playerName, player)
   -- Required fields must be the right types
   if type(player.last_checked) ~= "number" then return end
   if type(player.thisWeekHonor) ~= "number" then return end
-  -- race can be nil from buggy senders; also filter enemy faction
-  if player.race == nil or eFaction[player.race] then return end
+  -- Accept entries without race (old HonorSpyTurtle clients don't send it),
+  -- but still reject known enemy-faction entries from enhanced clients.
+  if player.race ~= nil and eFaction[player.race] then return end
 
   -- Sanity on time window
   if player.last_checked < HonorSpy.db.realm.hs.last_reset or player.last_checked > time() then
@@ -488,6 +577,8 @@ function store_player(playerName, player)
 
   -- Copy then store if newer
   local pcopy = table.copy(player)
+  pcopy.unitID = nil       -- junk from old clients ("mouseover"/"target")
+  pcopy.is_outdated = nil  -- unused field from old clients
   local localPlayer = HonorSpy.db.realm.hs.currentStandings[playerName]
   if localPlayer == nil or (type(localPlayer.last_checked) == "number" and localPlayer.last_checked < pcopy.last_checked) then
     HonorSpy.db.realm.hs.currentStandings[playerName] = pcopy
@@ -496,6 +587,9 @@ end
 
 -- RECEIVE via AceComm-2.0
 function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player, filtered_players)
+	if HonorSpyCommDebug then
+		DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy CommDebug]|r OnCommReceive from |cffffffff" .. tostring(sender) .. "|r playerName=" .. tostring(playerName) .. " player=" .. tostring(player) .. " filtered=" .. tostring(filtered_players))
+	end
 	if playerName == false and type(filtered_players) == "table" then
 		for pn, pl in pairs(filtered_players) do
 			store_player(pn, pl)
@@ -507,25 +601,17 @@ function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player
 end
 
 -- SEND on death: share all standings with group/guild
+-- Each player is sent individually (~150 bytes, single chunk) to avoid multi-chunk
+-- splitting that causes transport corruption under BG load.
 local last_send_time = 0;
 function HonorSpy:PLAYER_DEAD()
-	local filtered_players, count = {}, 0
 	if (time() - last_send_time < 5*60) then return end
 	last_send_time = time()
 	for pName, player in pairs(self.db.realm.hs.currentStandings) do
 		local to_send = sanitize_player_for_comm(player)
 		if to_send then
-			filtered_players[pName] = to_send
-			count = count + 1
-			if count == 10 then
-				self:SendCommMessage("GROUP", false, false, filtered_players)
-				self:SendCommMessage("GUILD", false, false, filtered_players)
-				filtered_players, count = {}, 0
-			end
+			self:SendCommMessage("GROUP", pName, to_send)
+			self:SendCommMessage("GUILD", pName, to_send)
 		end
-	end
-	if count > 0 then
-		self:SendCommMessage("GROUP", false, false, filtered_players)
-		self:SendCommMessage("GUILD", false, false, filtered_players)
 	end
 end
