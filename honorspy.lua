@@ -129,9 +129,11 @@ local function StartInspecting(unitID)
 		inspectedPlayerName = nil;
 	end
 	if (name == nil
+		or name == "Unknown"
 		or name == inspectedPlayerName
 		or not UnitIsPlayer(unitID)
 		--or not UnitIsFriend("player", unitID)  -- all grouped players are Alliance on turtle so this will record enemy players data
+		or not UnitRace(unitID) -- race must be known for faction filtering (nil in cross-faction BGs if unit out of range)
 		or eFaction[UnitRace(unitID)] -- check if players race is of other faciton
 		or not CheckInteractDistance(unitID, 1)
 		or not CanInspect(unitID)) then
@@ -165,8 +167,8 @@ function HonorSpy:INSPECT_HONOR_UPDATE()
 	local player = self.db.realm.hs.currentStandings[inspectedPlayerName] or inspectedPlayers[inspectedPlayerName];
 	if (player.class == nil) then player.class = "nil" end
 
-	-- ADD THIS CHECK: Don't save enemy faction players
-	if player.race and eFaction[player.race] then
+	-- Don't save players with unknown or enemy-faction race
+	if not player.race or player.race == "" or eFaction[player.race] then
 		ClearInspectPlayer();
 		inspectedPlayerName = nil;
 		return;
@@ -691,6 +693,7 @@ end
 function store_player(playerName, player)
   -- Must have a reasonable name and a table payload
   if type(playerName) ~= "string" or string.len(playerName) > 12 then return end
+  if playerName == "Unknown" then return end
   if type(player) ~= "table" then return end
 
   -- Required fields must be the right types
@@ -716,6 +719,9 @@ function store_player(playerName, player)
   local pcopy = table.copy(player)
   pcopy.unitID = nil       -- junk from old clients ("mouseover"/"target")
   pcopy.is_outdated = nil  -- unused field from old clients
+  -- Race never changes — always keep the existing one if we have it
+  local existing = HonorSpy.db.realm.hs.currentStandings[playerName]
+  if existing and existing.race then pcopy.race = existing.race end
   -- Scrub NaN values (NaN is the only value where x ~= x)
   for k, v in pairs(pcopy) do
     if type(v) == "number" and v ~= v then return end  -- any NaN = corrupted, discard
@@ -789,33 +795,47 @@ end
 -- SEND on death: share all standings with group/guild
 -- Each player is sent individually (~150 bytes, single chunk) to avoid multi-chunk
 -- splitting that causes transport corruption under BG load.
+-- A random 0-10s delay staggers bursts when multiple addon users die simultaneously.
 local last_send_time = 0;
-function HonorSpy:PLAYER_DEAD()
-	if (time() - last_send_time < 5*60) then return end
-	last_send_time = time()
-	for pName, player in pairs(self.db.realm.hs.currentStandings) do
+local function DeathBurstSend()
+	for pName, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
 		local to_send = sanitize_player_for_comm(player)
 		if to_send then
-			debugSend(self, "GROUP", pName, to_send)
-			debugSend(self, "GUILD", pName, to_send)
+			debugSend(HonorSpy, "GROUP", pName, to_send)
+			debugSend(HonorSpy, "GUILD", pName, to_send)
 		end
 	end
 end
+function HonorSpy:PLAYER_DEAD()
+	if (time() - last_send_time < 5*60) then return end
+	last_send_time = time()
+	local delay = math.random() * 10
+	self:ScheduleEvent("HonorSpy_DeathBurst", DeathBurstSend, delay)
+end
 
--- TRICKLE SYNC: send one standings entry per second to GROUP while grouped.
--- Round-robins through the standings so data propagates while alive.
+-- TRICKLE SYNC: send one standings entry every 0.6s to GROUP+GUILD while grouped.
+-- Round-robins through a shuffled snapshot so data propagates while alive.
 local trickle_keys = {}   -- snapshot of player names from standings
 local trickle_idx = 0     -- current position in round-robin
 local trickle_active = false
 
+local function ShuffleTable(t)
+	local n = table.getn(t)
+	for i = n, 2, -1 do
+		local j = math.random(1, i)
+		t[i], t[j] = t[j], t[i]
+	end
+end
+
 local function TrickleTick()
 	local standings = HonorSpy.db.realm.hs.currentStandings
-	-- Rebuild key list when we wrap around or it's empty
+	-- Rebuild and shuffle key list when we wrap around or it's empty
 	if trickle_idx >= table.getn(trickle_keys) then
 		trickle_keys = {}
 		for name in pairs(standings) do
 			table.insert(trickle_keys, name)
 		end
+		ShuffleTable(trickle_keys)
 		trickle_idx = 0
 		if table.getn(trickle_keys) == 0 then return end
 	end
@@ -826,6 +846,7 @@ local function TrickleTick()
 		local to_send = sanitize_player_for_comm(player)
 		if to_send then
 			debugSend(HonorSpy, "GROUP", pName, to_send)
+			debugSend(HonorSpy, "GUILD", pName, to_send)
 		end
 	end
 end
@@ -836,7 +857,7 @@ local function StartTrickleSync()
 	trickle_active = true
 	trickle_keys = {}
 	trickle_idx = 0
-	HonorSpy:ScheduleRepeatingEvent("HonorSpy_TrickleSync", TrickleTick, 1)
+	HonorSpy:ScheduleRepeatingEvent("HonorSpy_TrickleSync", TrickleTick, 0.6)
 end
 
 local function StopTrickleSync()

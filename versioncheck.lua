@@ -238,7 +238,7 @@ SlashCmdList["HSVER"] = function(msg)
 			for d = 7, 1, -1 do
 				local b = 1.05 + 0.15 * (d / 7)
 				local t = math.floor(med * b / 1000 + 0.5) * 1000
-				local marker = (days and math.floor(days + 0.5) == d) and "  |cff66ff66<< now|r" or ""
+				local marker = (days and math.ceil(days) == d) and "  |cff66ff66<< now|r" or ""
 				DEFAULT_CHAT_FRAME:AddMessage(string.format("    %dd left: |cffffffff%d|r  (%.2fx)%s", d, t, b, marker), 0.6, 0.6, 0.6)
 			end
 		end
