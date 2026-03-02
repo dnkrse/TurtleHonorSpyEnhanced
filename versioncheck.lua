@@ -213,6 +213,8 @@ SlashCmdList["HSVER"] = function(msg)
 			overlay.versionFooter:SetText("v" .. MY_VERSION)
 		end
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Version display reset.", 1, 0.82, 0)
+	elseif msg == "debug reset" then
+		HonorSpy:ResetDebugOptions()
 	elseif msg == "debug" then
 		HonorSpy:ToggleDebugMenu()
 	elseif msg == "b14" then
@@ -299,6 +301,7 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver safe reset — clear recommended target override", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver b14 — show B14 info and recommended target", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug — toggle debug menu in right-click dropdown", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug reset — reset all debug options and overrides", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users — list known addon users and versions", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
 	end

@@ -7,7 +7,10 @@ HonorSpy:RegisterDefaults('realm', {
 		currentStandings = {},
 		last_reset = 0,
 		sort = L["ThisWeekHonor"],
-		limit = 750
+		limit = 750,
+		debugMenu = false,
+		commErrors = false,
+		commRawData = false,
 	}
 })
 
@@ -38,23 +41,26 @@ end
 local commPrefix = "HonorSpy"
 HonorSpy:SetCommPrefix(commPrefix)
 
--- Debug flag: when true, AceComm-2.0 will print raw chunk bytes and decode failures to chat.
--- Toggle with the "Comm Debug" checkbox in the HonorSpy menu, or set HonorSpyCommDebug = true in-game.
+-- Debug flags: toggle independently via the Debug menu (visible after /hsver debug).
+HonorSpyCommErrors  = false  -- show AceComm deserialization failures and unsuppress error handler
+HonorSpyCommRawData = false  -- log raw chunk hex, outgoing sends, incoming receives, and store events
+-- Convenience alias: true when either debug flag is on (used in AceComm low-level hooks)
 HonorSpyCommDebug = false
+local function updateCommDebug() HonorSpyCommDebug = HonorSpyCommErrors or HonorSpyCommRawData end
 -- Controls whether the Debug menu group is visible (toggled via /hsver)
 local debugMenuEnabled = false
--- Storage for failed chunks (populated by AceComm-2.0 when HonorSpyCommDebug = true)
+-- Storage for failed chunks (populated by AceComm-2.0 when HonorSpyCommErrors is true)
 HonorSpy_FailedChunks = {}
 -- Temporary slot used by AceComm-2.0 HandleMessage to pass context into Deserialize's error handler
 HonorSpy_PendingChunk = nil
 
--- Suppress AceComm/serialization errors unless debug mode is on.
+-- Suppress AceComm/serialization errors unless error display is on.
 -- WoW 1.12 fires the global error handler even inside pcall, so corrupt
 -- comm data from other players causes red ERROR spam.
 do
 	local origHandler = geterrorhandler()
 	seterrorhandler(function(msg)
-		if not HonorSpyCommDebug then
+		if not HonorSpyCommErrors then
 			local s = msg or ""
 			if string.find(s, "AceComm") or string.find(s, "Deserialize")
 			   or string.find(s, "HandleMessage") or string.find(s, "CHAT_MSG_ADDON") then
@@ -65,9 +71,9 @@ do
 	end)
 end
 
--- Debug-aware send wrapper: logs outgoing data to chat when HonorSpyCommDebug is enabled
+-- Debug-aware send wrapper: logs outgoing data to chat when raw data logging is enabled
 local function debugSend(self, dist, pName, data)
-	if HonorSpyCommDebug then
+	if HonorSpyCommRawData then
 		local fields = ""
 		if type(data) == "table" then
 			fields = "honor=" .. tostring(data.thisWeekHonor)
@@ -95,6 +101,12 @@ if (type(VF_InspectDone) ~= "nil" and type(VF_StartInspectingTarget) ~= "nil") t
 end
 
 function HonorSpy:OnEnable()
+	-- Restore persisted debug flags
+	debugMenuEnabled = self.db.realm.hs.debugMenu or false
+	self.debugMode = debugMenuEnabled
+	HonorSpyCommErrors = self.db.realm.hs.commErrors or false
+	HonorSpyCommRawData = self.db.realm.hs.commRawData or false
+	updateCommDebug()
 	self.OnMenuRequest = BuildMenu()
 	self:Hook("InspectUnit");
 	self:RegisterComm(commPrefix, "GROUP", "OnCommReceive")
@@ -200,7 +212,7 @@ function HonorSpy:INSPECT_HONOR_UPDATE()
 		end
 		player._source = "INSPECT"
 		player._received = time()
-		if HonorSpyCommDebug then
+		if HonorSpyCommRawData then
 			DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy Debug]|r Stored |cffffffff" .. inspectedPlayerName .. "|r from |cff00ff00INSPECT|r honor=" .. tostring(player.thisWeekHonor) .. " rank=" .. tostring(player.rank))
 		end
 		self.db.realm.hs.currentStandings[inspectedPlayerName] = player;
@@ -367,8 +379,30 @@ HonorSpy:RegisterChatCommand({"/honorspy", "/hs"}, options)
 function HonorSpy:ToggleDebugMenu()
 	debugMenuEnabled = not debugMenuEnabled
 	self.debugMode = debugMenuEnabled
+	self.db.realm.hs.debugMenu = debugMenuEnabled
 	self.OnMenuRequest = BuildMenu()
 	DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Debug menu " .. (debugMenuEnabled and "|cff00ff00shown|r" or "|cffff4444hidden|r"), 1, 0.82, 0)
+end
+
+-- Called from /hsver debug reset — clears all debug overrides and flags
+function HonorSpy:ResetDebugOptions()
+	-- Honor and safe target overrides
+	HonorSpyDebugHonorOverride = nil
+	HonorSpyDebugSafeOverride = nil
+	-- Comm debug flags
+	HonorSpyCommErrors = false
+	HonorSpyCommRawData = false
+	updateCommDebug()
+	self.db.realm.hs.commErrors = false
+	self.db.realm.hs.commRawData = false
+	-- Failed chunks storage
+	HonorSpy_FailedChunks = {}
+	-- Debug menu visibility
+	debugMenuEnabled = false
+	self.debugMode = false
+	self.db.realm.hs.debugMenu = false
+	self.OnMenuRequest = BuildMenu()
+	DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r All debug options reset.", 1, 0.82, 0)
 end
 
 -- MINIMAP
@@ -595,33 +629,48 @@ function BuildMenu()
 		desc = "Debug tools for diagnosing comm issues",
 		order = 7,
 		args = {
-			comm_debug = {
+			comm_errors = {
 				type = "toggle",
-				name = "Comm Debug",
-				desc = "Log raw AceComm chunks to chat to help diagnose corrupted message errors. Disable when not needed.",
+				name = "Comm Errors",
+				desc = "Show AceComm deserialization failures in chat and record failed chunks for export.",
 				order = 1,
-				get = function() return HonorSpyCommDebug end,
+				get = function() return HonorSpyCommErrors end,
 				set = function(v)
-					HonorSpyCommDebug = v
+					HonorSpyCommErrors = v
+					HonorSpy.db.realm.hs.commErrors = v
+					updateCommDebug()
 					if v then
 						HonorSpy_FailedChunks = {}
 						table.setn(HonorSpy_FailedChunks, 0)
 					end
-					HonorSpy:Print("Comm debug " .. (v and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. " - " .. (v and "raw chunks will be printed to chat." or "logging stopped."))
+					HonorSpy:Print("Comm errors " .. (v and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
+				end,
+			},
+			comm_rawdata = {
+				type = "toggle",
+				name = "Raw Comm Data",
+				desc = "Log raw AceComm chunks, outgoing sends, incoming receives, and store events to chat.",
+				order = 2,
+				get = function() return HonorSpyCommRawData end,
+				set = function(v)
+					HonorSpyCommRawData = v
+					HonorSpy.db.realm.hs.commRawData = v
+					updateCommDebug()
+					HonorSpy:Print("Raw comm data " .. (v and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
 				end,
 			},
 			dump_failures = {
 				type = "execute",
 				name = "Dump Comm Failures",
-				desc = "Open export window showing full hex of all recorded failed comm chunks (enable Comm Debug first)",
-				order = 2,
+				desc = "Open export window showing full hex of all recorded failed comm chunks (enable Comm Errors first)",
+				order = 3,
 				func = function() HonorSpy:DumpCommFailures() end,
 			},
 			heal_database = {
 				type = "execute",
 				name = "Heal Database",
 				desc = "Fix NaN fields, remove entries with corrupt timestamps or negative honor, clamp rank/RP to valid ranges.",
-				order = 3,
+				order = 4,
 				func = function() healNaNData() end,
 			},
 		},
@@ -637,7 +686,7 @@ function HonorSpy:DumpCommFailures()
 	local _G = getfenv(0)
 	local n = HonorSpy_FailedChunks and table.getn(HonorSpy_FailedChunks) or 0
 	if n == 0 then
-		self:Print("|cffff9900No comm failures recorded.|r Enable |cff00ff00Comm Debug|r in Settings, reproduce the error, then come back here.")
+		self:Print("|cffff9900No comm failures recorded.|r Enable |cff00ff00Comm Errors|r in Settings, reproduce the error, then come back here.")
 		return
 	end
 
@@ -645,7 +694,9 @@ function HonorSpy:DumpCommFailures()
 	for i = 1, n do
 		local f = HonorSpy_FailedChunks[i]
 		lines[i] = "=== Failure #" .. i .. " ===\n" ..
+			"Time   : " .. date("%d/%m/%y %H:%M:%S", f.time) .. "\n" ..
 			"Sender : " .. tostring(f.sender) .. "\n" ..
+			"Channel: " .. tostring(f.dist) .. "\n" ..
 			"Prefix : " .. tostring(f.prefix) .. "\n" ..
 			"Len    : " .. tostring(f.len) .. " bytes\n" ..
 			"Error  : " .. tostring(f.err) .. "\n" ..
@@ -757,7 +808,7 @@ function store_player(playerName, player, sender)
   if localPlayer == nil or (type(localPlayer.last_checked) == "number" and localPlayer.last_checked < pcopy.last_checked) then
     pcopy._source = sender or "unknown"
     pcopy._received = time()
-    if HonorSpyCommDebug then
+    if HonorSpyCommRawData then
       DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy Debug]|r Stored |cffffffff" .. playerName .. "|r from |cff00ff00" .. pcopy._source .. "|r honor=" .. tostring(pcopy.thisWeekHonor) .. " rank=" .. tostring(pcopy.rank))
     end
     HonorSpy.db.realm.hs.currentStandings[playerName] = pcopy
@@ -789,7 +840,7 @@ end
 
 -- RECEIVE via AceComm-2.0
 function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player, filtered_players)
-	if HonorSpyCommDebug then
+	if HonorSpyCommRawData then
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy CommDebug]|r OnCommReceive from |cffffffff" .. tostring(sender) .. "|r playerName=" .. tostring(playerName) .. " player=" .. tostring(player) .. " filtered=" .. tostring(filtered_players))
 	end
 	if playerName == false and type(filtered_players) == "table" then
