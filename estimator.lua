@@ -431,7 +431,7 @@ local function UpdateEstimator(honorValue)
 	-- Wasted honor indicator
 	if cachedCapHonor > 0 and honorValue > cachedCapHonor then
 		local wasted = honorValue - cachedCapHonor
-		wasteText:SetText("|cffff6666" .. FormatNumber(wasted) .. " honor overshoot|r (RP capped)")
+		wasteText:SetText("|cffff6666+" .. FormatNumber(wasted) .. " over recommended target|r — coordinate with bracket")
 
 		-- Compute total RP damage to others from the gap you create.
 		-- Everyone between your cap standing and your ego standing gets pushed
@@ -478,12 +478,11 @@ local function UpdateEstimator(honorValue)
 		end
 
 		if totalRPLoss > 0 then
-			impactText:SetText(string.format("|cffff8888Breaks the stack: %d player%s lose%s -%s RP|r",
+			impactText:SetText(string.format("|cffff8888This costs %d player%s a total of %s RP.|r",
 				affectedCount, affectedCount == 1 and "" or "s",
-				affectedCount == 1 and "s" or "",
 				FormatNumber(totalRPLoss)))
 		else
-			impactText:SetText("|cffff6666Overshooting breaks honor gains for other players!|r")
+			impactText:SetText("|cffff6666Extra honor spreads the bracket and lowers RP for others.|r")
 		end
 	else
 		if bracket >= 14 then

@@ -12,6 +12,12 @@ ttRankIcon:SetWidth(16)
 ttRankIcon:SetHeight(16)
 ttRankIcon:Hide()
 
+local ttSafeIcon = GameTooltip:CreateTexture("HonorSpyTooltipSafeIcon", "OVERLAY")
+ttSafeIcon:SetWidth(16)
+ttSafeIcon:SetHeight(16)
+ttSafeIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
+ttSafeIcon:Hide()
+
 -----------------------------------------------------------------------
 -- Layout constants
 -----------------------------------------------------------------------
@@ -74,7 +80,7 @@ local function ApplyRow(r, d)
 	if d.type == "sep" then
 		r.rankIcon:Hide()
 		r.nameFS:SetText(C:Colorize("888866", string.format("-- Bracket %d --", d.bracket)))
-		if d._ext then
+		if d._ext or d._b14_players then
 			r:EnableMouse(true)
 			r.rowData = d
 		else
@@ -208,23 +214,97 @@ local function CreateRow(vi, parent)
 		local td = this.rowData
 		if not td then return end
 		if td.type == "sep" then
-			if not td._ext or td._ext.need1 == 0 then return end
 			local ext = td._ext
+			local hasSlotInfo = ext and ext.need1 and ext.need1 > 0
+			local hasB14 = td.bracket == 14 and td._b14_slots and td._b14_slots >= 1 and td._b14_players
+			if not hasSlotInfo and not hasB14 then return end
+
 			GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
 			GameTooltip:ClearLines()
 			GameTooltip:AddLine(string.format("|cffddaa44Bracket %d — Slot Info|r", td.bracket), 0.87, 0.67, 0.27)
 			GameTooltip:AddLine(" ", 1, 1, 1)
 			GameTooltip:AddDoubleLine("Players ranked this week:", string.format("%d", td._pool_size), 0.7, 0.7, 0.7, 1, 1, 1)
-			GameTooltip:AddDoubleLine("Open slots in bracket:", string.format("%d", ext.slots), 0.7, 0.7, 0.7, 1, 1, 1)
-			if ext.need1 > 0 then
+			if ext then
+				GameTooltip:AddDoubleLine("Open slots in bracket:", string.format("%d", ext.slots), 0.7, 0.7, 0.7, 1, 1, 1)
+			end
+			if hasSlotInfo then
 				GameTooltip:AddLine(" ", 1, 1, 1)
 				GameTooltip:AddDoubleLine("+1 slot at:", string.format("%d  (+%d more)", ext.pool1, ext.need1), 0.7, 0.7, 0.7, 1, 1, 0.6)
 				if ext.need2 > 0 then
 					GameTooltip:AddDoubleLine("+2 slots at:", string.format("%d  (+%d more)", ext.pool2, ext.need2), 0.7, 0.7, 0.7, 0.6, 0.6, 0.4)
 				end
-				GameTooltip:AddLine(" ", 1, 1, 1)
-				GameTooltip:AddLine("Any player earning honor this week counts.", 0.6, 0.6, 0.6)
+				if not hasB14 then
+					GameTooltip:AddLine(" ", 1, 1, 1)
+					GameTooltip:AddLine("Any player earning honor this week counts.", 0.6, 0.6, 0.6)
+				end
 			end
+
+			if hasB14 then
+				local players = td._b14_players
+				local nSlots  = td._b14_slots
+				local avg     = td._b14_avg or 0
+				local safeTarget = td._b14_safe_target or 0
+
+				local minH, maxH = players[1].honor, players[1].honor
+				for pi = 2, nSlots do
+					local p = players[pi]
+					if p then
+						if p.honor < minH then minH = p.honor end
+						if p.honor > maxH then maxH = p.honor end
+					end
+				end
+				local spread = maxH - minH
+				local optPct = (avg > 0 and spread > 0) and math.max(0, math.floor((1 - spread / avg) * 100 + 0.5)) or 100
+
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				local optClr = optPct >= 80 and {0.27, 0.87, 0.47} or (optPct >= 50 and {0.87, 0.73, 0.27} or {1, 0.4, 0.4})
+				GameTooltip:AddDoubleLine("Bracket Optimization:", string.format("%d%%", optPct), 0.87, 0.67, 0, optClr[1], optClr[2], optClr[3])
+				GameTooltip:AddLine("Shows how close bracket 14 players are in honor.", 0.6, 0.6, 0.6)
+				GameTooltip:AddLine("When everyone farms similar amounts, you all get", 0.6, 0.6, 0.6)
+				GameTooltip:AddLine("more rank points (up to |cffbba860" .. "13,000 RP|r each).", 0.6, 0.6, 0.6)
+				GameTooltip:AddLine("If this % is low, those ahead should take a break", 0.6, 0.6, 0.6)
+				GameTooltip:AddLine("so others can catch up. Coordinate on a shared honor", 0.6, 0.6, 0.6)
+				GameTooltip:AddLine("target to help everyone rank faster.", 0.6, 0.6, 0.6)
+
+				-- Per-player overshoot warning for the local player
+				local myName = UnitName("player")
+				local myHonor = 0
+				for pi = 1, nSlots do
+					local p = players[pi]
+					if p and p.name == myName then myHonor = p.honor; break end
+				end
+				if safeTarget > 0 and myHonor > safeTarget then
+					local excess = myHonor - safeTarget
+					GameTooltip:AddLine(" ", 1, 1, 1)
+					GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
+					GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
+					GameTooltip:AddDoubleLine("Excess:",      string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
+				end
+
+				GameTooltip:AddLine(" ", 1, 1, 1)
+				GameTooltip:AddLine("Current RP awards:", 0.87, 0.73, 0.27)
+				for pi = 1, nSlots do
+					local p = players[pi]
+					if p then
+						local isMe = p.name == myName
+						local offPct = p.progressLoss or 0
+						local offStr = ""
+						if offPct > 0 then
+							local intensity = math.min(offPct / 50, 1)
+							local r = string.format("%02x", math.floor(255 - intensity * 105 + 0.5))
+							local g = string.format("%02x", math.floor(100 - intensity * 80 + 0.5))
+							local b = string.format("%02x", math.floor(100 - intensity * 80 + 0.5))
+							offStr = string.format("|cff%s%s%s-%d%%|r ", r, g, b, offPct)
+						end
+						GameTooltip:AddDoubleLine(
+							isMe and ("|cffff6666" .. p.name .. "|r") or p.name,
+							isMe and string.format("|cffff6666%s%d RP|r", offStr, p.award) or string.format("%s|cffaaaaaa%d RP|r", offStr, p.award),
+							1, 1, 1, 1, 1, 1
+						)
+					end
+				end
+			end
+
 			GameTooltip:Show()
 			return
 		end
@@ -255,9 +335,10 @@ local function CreateRow(vi, parent)
 			if td._addonVer == "pre-1.2" then
 				GameTooltip:AddDoubleLine("Addon:", "pre-1.2", 0.7, 0.7, 0.7, 0.8, 0.6, 0.2)
 			else
-				GameTooltip:AddDoubleLine("Addon:", "v" .. td._addonVer, 0.7, 0.7, 0.7, 0.33, 0.8, 1)
+				GameTooltip:AddDoubleLine("Addon:", "v" .. td._addonVer, 0.7, 0.7, 0.7, 0.8, 0.47, 1)
 			end
 		end
+		local skullLine
 		if td._b14Safety then
 			local players = td._b14_players
 			local nSlots = td._b14_slots or 0
@@ -277,31 +358,16 @@ local function CreateRow(vi, parent)
 			local excess = safeTarget > 0 and (myHonor - safeTarget) or 0
 
 			GameTooltip:AddLine(" ", 1, 1, 1)
-			GameTooltip:AddLine("|cffddaa00-- Bracket 14 Analysis --|r", 0.87, 0.67, 0)
-			GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
-			GameTooltip:AddDoubleLine("Safe target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
-			GameTooltip:AddDoubleLine("Excess:",      string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
-			GameTooltip:AddLine("This spreads the RP curve — others earn less.", 0.7, 0.7, 0.7)
-
-			if nSlots >= 1 and players then
-				GameTooltip:AddLine(" ", 1, 1, 1)
-				GameTooltip:AddLine("Current RP awards:", 0.87, 0.73, 0.27)
-				for pi = 1, nSlots do
-					local p = players[pi]
-					if p then
-						local isThis = p.name == td._name
-						GameTooltip:AddDoubleLine(
-							isThis and ("|cffff6666" .. p.name .. "|r") or p.name,
-							isThis and string.format("|cffff6666%d RP|r", p.award) or string.format("|cffaaaaaa%d RP|r", p.award),
-							1, 1, 1, 1, 1, 1
-						)
-					end
-				end
-				GameTooltip:AddLine(" ", 1, 1, 1)
-				GameTooltip:AddLine("If equalized: 13,000 RP each.", 0.27, 0.87, 0.47)
-			end
+			GameTooltip:AddLine("     |cffdd4422-- Above Recommended Target --|r", 0.87, 0.27, 0.13)
+			skullLine = GameTooltip:NumLines()
+			GameTooltip:AddLine("You're already safely in bracket 14 if the reset", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("happened right now. Farming further above the recommended", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("target spreads the bracket and lowers RP for others.", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("Coordinate with your bracket on a shared honor target.", 0.87, 0.73, 0.27)
 			GameTooltip:AddLine(" ", 1, 1, 1)
-			GameTooltip:AddLine("Coordinate on a shared honor target.", 0.87, 0.73, 0.27)
+			GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
+			GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Ahead by:",    string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
 		end
 		GameTooltip:Show()
 		if td._rank > 0 then
@@ -312,9 +378,20 @@ local function CreateRow(vi, parent)
 		else
 			ttRankIcon:Hide()
 		end
+		if skullLine then
+			local anchor = getglobal("GameTooltipTextLeft" .. skullLine)
+			if anchor then
+				ttSafeIcon:ClearAllPoints()
+				ttSafeIcon:SetPoint("LEFT", anchor, "LEFT", 0, 0)
+				ttSafeIcon:Show()
+			end
+		else
+			ttSafeIcon:Hide()
+		end
 	end)
 	r:SetScript("OnLeave", function()
 		ttRankIcon:Hide()
+		ttSafeIcon:Hide()
 		GameTooltip:Hide()
 	end)
 
@@ -594,6 +671,7 @@ function HonorSpyStandings:RenderStandings()
 	local b14_cutoff_honor = 0
 	local b14_cutoff_name = nil
 	local b14_safe_target = 0
+	local b14_daysLeft = nil
 	if b14_slots >= 1 and b14_slots < pool_size then
 		b14_cutoff_honor = t[b14_slots + 1][3] or 0
 		b14_cutoff_name  = t[b14_slots + 1][1]
@@ -607,9 +685,8 @@ function HonorSpyStandings:RenderStandings()
 			local daysUntil = rawD - math.floor(rawD / 7) * 7
 			if daysUntil == 0 then daysUntil = 7 end
 			local daysLeft = daysUntil - (hh * 60 + mm) / 1440
-			local timeMult = 1 + math.max(0, daysLeft - 1) * 0.5
-			local safeMargin = math.min(b14_cutoff_honor * 0.15, 60000) * timeMult
-			b14_safe_target = math.floor(b14_cutoff_honor + safeMargin + 0.5)
+			-- Safe target computed below after b14_avg is known
+			b14_daysLeft = daysLeft
 		end
 	end
 
@@ -633,22 +710,55 @@ function HonorSpyStandings:RenderStandings()
 	-- Collect B14 player names for tooltip
 	local b14_players = {}
 	local b14_avg = 0
+	local b14_median = 0
 	if b14_slots >= 1 then
 		local honorSum = 0
+		local honorList = {}
 		for j = 1, b14_slots do
 			if t[j] then
 				local hon = t[j][3] or 0
+				local rp  = t[j][6] or 0
+				local aw  = math.floor(CalcRpEarning(hon) + 0.5)
+				local idealEnd  = CalcRpDecay(13000, rp)
+				local actualEnd = CalcRpDecay(aw, rp)
+				local progLoss  = (idealEnd - actualEnd) / 50
 				table.insert(b14_players, {
 					name  = t[j][1],
 					honor = hon,
-					award = math.floor(CalcRpEarning(hon) + 0.5),
+					award = aw,
+					progressLoss = math.floor(progLoss + 0.5),
 				})
+				table.insert(honorList, hon)
 				honorSum = honorSum + hon
 			end
 		end
 		if b14_slots > 0 then
 			b14_avg = math.floor(honorSum / b14_slots + 0.5)
 		end
+		-- Compute median
+		table.sort(honorList, function(a, b) return a < b end)
+		local n = table.getn(honorList)
+		if n > 0 then
+			if math.mod(n, 2) == 1 then
+				b14_median = honorList[math.ceil(n / 2)]
+			else
+				b14_median = math.floor((honorList[n / 2] + honorList[n / 2 + 1]) / 2 + 0.5)
+			end
+		end
+		-- Safe target: median × time-scaled buffer, requires 3+ players and 50k+ median
+		if b14_daysLeft and b14_slots >= 3 and b14_median >= 50000 then
+			local buffer = 1.05 + 0.15 * (b14_daysLeft / 7)
+			b14_safe_target = math.floor(b14_median * buffer / 1000 + 0.5) * 1000
+		end
+		HonorSpyStandings._b14_avg = b14_avg
+		HonorSpyStandings._b14_median = b14_median
+		if HonorSpyDebugSafeOverride then
+			b14_safe_target = HonorSpyDebugSafeOverride
+		end
+		HonorSpyStandings._b14_safe_target = b14_safe_target
+		HonorSpyStandings._b14_daysLeft = b14_daysLeft
+		HonorSpyStandings._b14_slots = b14_slots
+		HonorSpyStandings._b14_players = b14_players
 	end
 
 	-- Build displayRows (fresh table each render)
@@ -674,15 +784,20 @@ function HonorSpyStandings:RenderStandings()
 
 		-- Separator
 		if my_bracket ~= prev_bracket then
-			table.insert(displayRows, {
+			local sep = {
 				type = "sep",
 				bracket = my_bracket,
 				showTotal = (prev_bracket == 0),
 				_ext = brk_ext[my_bracket],
 				_pool_size = pool_size,
-				-- keep b14-specific fields for the player-row B14 analysis tooltip
-				_b14_slots = (my_bracket == 14) and b14_slots or nil,
-			})
+			}
+			if my_bracket == 14 and b14_slots >= 1 then
+				sep._b14_slots   = b14_slots
+				sep._b14_players = b14_players
+				sep._b14_avg     = b14_avg
+				sep._b14_safe_target = b14_safe_target
+			end
+			table.insert(displayRows, sep)
 			prev_bracket = my_bracket
 		end
 

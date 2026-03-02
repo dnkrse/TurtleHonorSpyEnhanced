@@ -302,6 +302,7 @@ overshootSubText:SetPoint("TOPLEFT", overshootText, "BOTTOMLEFT", 0, -1)
 overshootSubText:SetPoint("RIGHT", overshootBtn, "RIGHT", -6, 0)
 overshootSubText:SetJustifyH("LEFT")
 overshootSubText:SetTextColor(0.53, 0.8, 1)
+overshootSubText:SetText("[More Info]")
 
 local overshootState = { excess = 0, target = 0, daysLeft = 0, b14Players = {} }
 
@@ -311,22 +312,19 @@ HonorSpyDebugHonorOverride = nil
 overshootBtn:SetScript("OnEnter", function()
 	GameTooltip:SetOwner(this, "ANCHOR_BOTTOM")
 	GameTooltip:ClearLines()
-	GameTooltip:AddLine("Bracket 14 - Honor Overshoot", 1, 0.82, 0)
+	GameTooltip:AddLine("Above Recommended Target", 1, 0.3, 0.2)
 	GameTooltip:AddLine(" ", 1, 1, 1)
-	GameTooltip:AddLine("Your honor this week is significantly higher", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("than what is needed to hold your B14 slot.", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("You're already safely in bracket 14 if the reset", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("happened right now. Farming further above the recommended", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("target spreads the bracket and lowers RP for others.", 0.9, 0.9, 0.9)
 	GameTooltip:AddLine(" ", 1, 1, 1)
-	GameTooltip:AddLine("Extra honor beyond your bracket cutoff does", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("not increase your RP reward. However, the", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("widening gap between you and other B14", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("players distorts the RP curve, which can", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("reduce the RP they earn this week.", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("Coordinate with your bracket on a shared honor target.", 0.87, 0.73, 0.27)
 	if overshootState.excess > 0 then
 		local myHonorTotal = overshootState.excess + overshootState.target
 		GameTooltip:AddLine(" ", 1, 1, 1)
 		GameTooltip:AddDoubleLine("Your honor:",   string.format("%d", myHonorTotal),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
-		GameTooltip:AddDoubleLine("Safe target:",  string.format("%d", overshootState.target), 0.7, 0.7, 0.7, 1, 1, 1)
-		GameTooltip:AddDoubleLine("Excess:",       string.format("+%d", overshootState.excess), 0.7, 0.7, 0.7, 1, 0.5, 0.5)
+		GameTooltip:AddDoubleLine("Recommended target:",  string.format("%d", overshootState.target), 0.7, 0.7, 0.7, 1, 1, 1)
+		GameTooltip:AddDoubleLine("Ahead by:",     string.format("+%d", overshootState.excess), 0.7, 0.7, 0.7, 1, 0.5, 0.5)
 		GameTooltip:AddDoubleLine("Days to reset:", string.format("%.1f", overshootState.daysLeft), 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
 	end
 	GameTooltip:AddLine(" ", 1, 1, 1)
@@ -345,10 +343,8 @@ Frame.overshootText = overshootText
 local FRAME_H_NORMAL = 150
 local FRAME_H_WARN   = 190
 
--- Overshoot trigger: honor must exceed cutoff by more than this margin.
--- The margin is pct-based at low brackets but capped so high-cutoff brackets
--- don't require an unreachable gap before the warning fires.
-local OVERSHOOT = { PCT = 0.15, MAX_MARGIN = 60000, DAY_SCALE = 0.5 }
+-- Safe target: median × time-scaled buffer (tightens as reset approaches).
+local OVERSHOOT = {}
 
 -- Fractional days until the next PVP reset (0 = imminent, ~7 = just reset).
 function OVERSHOOT.GetDaysUntilReset()
@@ -601,22 +597,32 @@ local function UpdateOverlay()
 	-- === B14 Overshoot Warning ===
 	local b14_slots = BRK[13]
 	local isOver = false
-	if myBracket == 14 and b14_slots >= 1 and b14_slots < pool_size then
-		local b14_cutoff_honor = t[b14_slots + 1][3] or 0
-		if b14_cutoff_honor > 0 then
+	if myBracket == 14 and b14_slots >= 3 and b14_slots < pool_size then
+		-- Collect B14 honor values and compute median
+		local honorList = {}
+		for j = 1, b14_slots do
+			if t[j] then table.insert(honorList, t[j][3] or 0) end
+		end
+		table.sort(honorList, function(a, b) return a < b end)
+		local n = table.getn(honorList)
+		local b14_median = 0
+		if n > 0 then
+			if math.mod(n, 2) == 1 then
+				b14_median = honorList[math.ceil(n / 2)]
+			else
+				b14_median = math.floor((honorList[n / 2] + honorList[n / 2 + 1]) / 2 + 0.5)
+			end
+		end
+		if b14_median >= 50000 then
 			local daysOk, daysLeft = pcall(OVERSHOOT.GetDaysUntilReset)
 			if not daysOk or type(daysLeft) ~= "number" then daysLeft = 1 end
-			local timeMult = 1 + math.max(0, daysLeft - 1) * OVERSHOOT.DAY_SCALE
-			local safeMargin = math.min(b14_cutoff_honor * OVERSHOOT.PCT, OVERSHOOT.MAX_MARGIN) * timeMult
-			local excess = thisWeekHonor - b14_cutoff_honor
-			if excess > safeMargin then
+			local buffer = 1.05 + 0.15 * (daysLeft / 7)
+			local safeTarget = math.floor(b14_median * buffer / 1000 + 0.5) * 1000
+			if thisWeekHonor > safeTarget then
 				isOver = true
-				local safeTarget = math.floor(b14_cutoff_honor + safeMargin + 0.5)
 				overshootState.excess = thisWeekHonor - safeTarget
 				overshootState.target = safeTarget
 				overshootState.daysLeft = daysLeft
-				overshootText:SetText("You might be farming too much honor!")
-				overshootSubText:SetText("[More Details]")
 
 				-- Collect other B14 players
 				overshootState.b14Players = {}
