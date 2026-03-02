@@ -337,6 +337,12 @@ local function CreateRow(vi, parent)
 				GameTooltip:AddDoubleLine("Addon:", "v" .. td._addonVer, 0.7, 0.7, 0.7, 0.8, 0.47, 1)
 			end
 		end
+		if HonorSpy.debugMode and td._source then
+			GameTooltip:AddDoubleLine("Source:", td._source, 0.7, 0.7, 0.7, 0.6, 0.8, 1)
+			if td._received then
+				GameTooltip:AddDoubleLine("Received:", date("%d/%m/%y %H:%M:%S", td._received), 0.7, 0.7, 0.7, 0.6, 0.8, 1)
+			end
+		end
 		local skullLine
 		if td._b14Safety then
 			local players = td._b14_players
@@ -541,7 +547,7 @@ function HonorSpyStandings:BuildStandingsTable()
 	for pn, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
 		if not (player.race and eFaction[player.race]) then
 			local displayRace = raceDisplayNames[player.race] or player.race
-			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked, displayRace })
+			table.insert(t, { pn, player.class, player.thisWeekHonor, player.lastWeekHonor, player.standing, player.RP, player.rank, player.last_checked, displayRace, player._source, player._received })
 		end
 	end
 	local sort_column = 3
@@ -768,7 +774,7 @@ function HonorSpyStandings:RenderStandings()
 	local limit = tonumber(HonorSpy.db.realm.hs.limit) or 0
 
 	for i = 1, table.getn(t) do
-		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked, race = unpack(t[i])
+		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked, race, source, received = unpack(t[i])
 		thisWeekHonor = thisWeekHonor or 0
 		lastWeekHonor = lastWeekHonor or 0
 		standing = standing or 0
@@ -910,6 +916,8 @@ function HonorSpyStandings:RenderStandings()
 			_bgZone = bgFriends[name],
 			_isOnline = onlineFriends[name],
 			_addonVer = addonVer,
+			_source = source,
+			_received = received,
 			_b14Safety = b14Safety,
 			_b14Buffer = b14Buffer,
 			_b14BufferPct = b14BufferPct,

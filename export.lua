@@ -148,7 +148,7 @@ function HonorSpy:ExportCSV()
 		end
 		local EstProgress = math.floor((EstRP - math.floor(EstRP / 5000) * 5000) / 5000 * 100)
 
-		local lastCheckedStr = date("!%x %X", last_checked)
+		local lastCheckedStr = date("%d/%m/%y %H:%M:%S", last_checked)
 
 		local line = string.format("%d,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
 			i, name, race or "", class or "",

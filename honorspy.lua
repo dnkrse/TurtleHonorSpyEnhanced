@@ -198,6 +198,11 @@ function HonorSpy:INSPECT_HONOR_UPDATE()
 		elseif (player.rank == 2) then
 			player.RP = math.ceil(player.rankProgress * 3000 + 2000)
 		end
+		player._source = "INSPECT"
+		player._received = time()
+		if HonorSpyCommDebug then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy Debug]|r Stored |cffffffff" .. inspectedPlayerName .. "|r from |cff00ff00INSPECT|r honor=" .. tostring(player.thisWeekHonor) .. " rank=" .. tostring(player.rank))
+		end
 		self.db.realm.hs.currentStandings[inspectedPlayerName] = player;
 		-- share with group/guild
 		local to_send = sanitize_player_for_comm(player)
@@ -361,6 +366,7 @@ HonorSpy:RegisterChatCommand({"/honorspy", "/hs"}, options)
 -- Called from /hsver debug (registered in versioncheck.lua)
 function HonorSpy:ToggleDebugMenu()
 	debugMenuEnabled = not debugMenuEnabled
+	self.debugMode = debugMenuEnabled
 	self.OnMenuRequest = BuildMenu()
 	DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Debug menu " .. (debugMenuEnabled and "|cff00ff00shown|r" or "|cffff4444hidden|r"), 1, 0.82, 0)
 end
@@ -691,7 +697,7 @@ function table.copy(t)
 end
 
 -- SYNCING -- (defensive checks so we never index a non-table)
-function store_player(playerName, player)
+function store_player(playerName, player, sender)
   -- Must have a reasonable name and a table payload
   if type(playerName) ~= "string" or string.len(playerName) > 12 then return end
   if playerName == "Unknown" then return end
@@ -749,6 +755,11 @@ function store_player(playerName, player)
   if pcopy.rank > 1 and pcopy.RP == 0 then return end
   local localPlayer = HonorSpy.db.realm.hs.currentStandings[playerName]
   if localPlayer == nil or (type(localPlayer.last_checked) == "number" and localPlayer.last_checked < pcopy.last_checked) then
+    pcopy._source = sender or "unknown"
+    pcopy._received = time()
+    if HonorSpyCommDebug then
+      DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy Debug]|r Stored |cffffffff" .. playerName .. "|r from |cff00ff00" .. pcopy._source .. "|r honor=" .. tostring(pcopy.thisWeekHonor) .. " rank=" .. tostring(pcopy.rank))
+    end
     HonorSpy.db.realm.hs.currentStandings[playerName] = pcopy
   end
 end
@@ -783,14 +794,14 @@ function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player
 	end
 	if playerName == false and type(filtered_players) == "table" then
 		for pn, pl in pairs(filtered_players) do
-			store_player(pn, pl)
+			store_player(pn, pl, sender)
 		end
 		tagSenderAddon(sender)
 		return
 	end
 	if type(playerName) ~= "string" then return end
 	tagSenderAddon(sender)
-	store_player(playerName, player)
+	store_player(playerName, player, sender)
 end
 
 -- SEND on death: share all standings with group/guild
