@@ -225,81 +225,22 @@ SlashCmdList["HSVER"] = function(msg)
 		if (med == 0 and avg == 0) or not players or table.getn(players) == 0 then
 			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r No B14 data yet. Open standings first.", 1, 0.82, 0)
 		else
-			GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR")
-			GameTooltip:ClearLines()
-			GameTooltip:AddLine(string.format("|cffddaa44Bracket %d — Slot Info|r", 14), 0.87, 0.67, 0.27)
-			GameTooltip:AddLine(" ", 1, 1, 1)
-			GameTooltip:AddDoubleLine("Slots:", string.format("%d", slots), 0.7, 0.7, 0.7, 1, 1, 1)
-
-			local minH, maxH = players[1].honor, players[1].honor
-			for pi = 2, slots do
-				local p = players[pi]
-				if p then
-					if p.honor < minH then minH = p.honor end
-					if p.honor > maxH then maxH = p.honor end
-				end
-			end
-			local spread = maxH - minH
-			local optPct = (avg > 0 and spread > 0) and math.max(0, math.floor((1 - spread / avg) * 100 + 0.5)) or 100
-
-			GameTooltip:AddLine(" ", 1, 1, 1)
-			local optClr = optPct >= 80 and {0.27, 0.87, 0.47} or (optPct >= 50 and {0.87, 0.73, 0.27} or {1, 0.4, 0.4})
-			GameTooltip:AddDoubleLine("Bracket Optimization:", string.format("%d%%", optPct), 0.87, 0.67, 0, optClr[1], optClr[2], optClr[3])
-			GameTooltip:AddLine("Shows how close bracket 14 players are in honor.", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("When everyone farms similar amounts, you all get", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("more rank points (up to |cffbba860" .. "13,000 RP|r each).", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("If this % is low, those ahead should take a break", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("so others can catch up. Coordinate on a shared honor", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("target to help everyone rank faster.", 0.6, 0.6, 0.6)
-
-			local myName = UnitName("player")
-			local myHonor = 0
-			for pi = 1, slots do
-				local p = players[pi]
-				if p and p.name == myName then myHonor = p.honor; break end
-			end
-			if safe > 0 and myHonor > safe then
-				local excess = myHonor - safe
-				GameTooltip:AddLine(" ", 1, 1, 1)
-				GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
-				GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safe), 0.7, 0.7, 0.7, 1, 1, 1)
-				GameTooltip:AddDoubleLine("Excess:",      string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
-			end
-
-			GameTooltip:AddLine(" ", 1, 1, 1)
-			GameTooltip:AddLine("Current RP awards:", 0.87, 0.73, 0.27)
-			for pi = 1, slots do
-				local p = players[pi]
-				if p then
-					local isMe = p.name == myName
-					local offPct = p.progressLoss or 0
-					local offStr = ""
-					if offPct > 0 then
-						local intensity = math.min(offPct / 50, 1)
-						local r = string.format("%02x", math.floor(255 - intensity * 105 + 0.5))
-						local g = string.format("%02x", math.floor(100 - intensity * 80 + 0.5))
-						local b = string.format("%02x", math.floor(100 - intensity * 80 + 0.5))
-						offStr = string.format("|cff%s%s%s-%d%%|r ", r, g, b, offPct)
-					end
-					GameTooltip:AddDoubleLine(
-						isMe and ("|cffff6666" .. p.name .. "|r") or p.name,
-						isMe and string.format("|cffff6666%s%d RP|r", offStr, p.award) or string.format("%s|cffaaaaaa%d RP|r", offStr, p.award),
-						1, 1, 1, 1, 1, 1
-					)
-				end
-			end
-
-			GameTooltip:AddLine(" ", 1, 1, 1)
-			GameTooltip:AddDoubleLine("Median:", string.format("%d", med), 0.7, 0.7, 0.7, 1, 1, 1)
-			GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safe), 0.7, 0.7, 0.7, 1, 1, 1)
+			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r B14 Info", 1, 0.82, 0)
+			DEFAULT_CHAT_FRAME:AddMessage(string.format("  Slots: |cffffffff%d|r", slots), 0.7, 0.7, 0.7)
+			DEFAULT_CHAT_FRAME:AddMessage(string.format("  Median: |cffffffff%d|r", med), 0.7, 0.7, 0.7)
+			DEFAULT_CHAT_FRAME:AddMessage(string.format("  Recommended target: |cffffffff%d|r", safe), 0.7, 0.7, 0.7)
 			if days then
 				local buffer = 1.05 + 0.15 * (days / 7)
-				GameTooltip:AddDoubleLine("Buffer:", string.format("%.3fx", buffer), 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
-				GameTooltip:AddDoubleLine("Days to reset:", string.format("%.1f", days), 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
+				DEFAULT_CHAT_FRAME:AddMessage(string.format("  Buffer: |cffffffff%.3fx|r", buffer), 0.7, 0.7, 0.7)
+				DEFAULT_CHAT_FRAME:AddMessage(string.format("  Days to reset: |cffffffff%.1f|r", days), 0.7, 0.7, 0.7)
 			end
-
-			GameTooltip:Show()
-			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r B14 tooltip shown. Move mouse to dismiss.", 1, 0.82, 0)
+			DEFAULT_CHAT_FRAME:AddMessage("  Projected target by day:", 0.87, 0.73, 0.27)
+			for d = 7, 1, -1 do
+				local b = 1.05 + 0.15 * (d / 7)
+				local t = math.floor(med * b / 1000 + 0.5) * 1000
+				local marker = (days and math.floor(days + 0.5) == d) and "  |cff66ff66<< now|r" or ""
+				DEFAULT_CHAT_FRAME:AddMessage(string.format("    %dd left: |cffffffff%d|r  (%.2fx)%s", d, t, b, marker), 0.6, 0.6, 0.6)
+			end
 		end
 	elseif msg == "users" or msg == "users reset" then
 		if msg == "users reset" then

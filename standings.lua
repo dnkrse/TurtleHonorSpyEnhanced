@@ -30,9 +30,9 @@ local FRAME_W     = 565
 -- Column layout: x = left offset inside row, w = width, j = justification
 local C_RICON  = {x = 4,   w = 16}
 local C_NAME   = {x = 24,  w = 120, j = "LEFT"}
-local C_STATUS = {x = 146, w = 18,  j = "LEFT"}
-local C_HONOR  = {x = 166, w = 65,  j = "RIGHT"}
-local C_RPAW   = {x = 235, w = 50,  j = "LEFT"}
+local C_STATUS = {x = 146, w = 32,  j = "LEFT"}
+local C_HONOR  = {x = 180, w = 55,  j = "RIGHT"}
+local C_RPAW   = {x = 239, w = 50,  j = "LEFT"}
 local C_TOTRP  = {x = 292, w = 55,  j = "RIGHT"}
 local C_GAIN   = {x = 352, w = 55,  j = "LEFT"}
 local C_CRANK  = {x = 408, w = 30,  j = "RIGHT"}
@@ -118,18 +118,17 @@ local function ApplyRow(r, d)
 		r.nRankIcon:Show()
 		r.nRankFS:SetText(d.nRankText)
 		r.diffFS:SetText(d.diffText)
-		-- Fixed slots after status: bomb at +12, skull at +26
-		local iconBase = C_STATUS.x + 12
+		-- Fixed slots after status: dot(146) bomb(158) skull(172) honor(180)
 		if d._addonVer then
 			r.addonIcon:ClearAllPoints()
-			r.addonIcon:SetPoint("LEFT", r, "LEFT", iconBase, 0)
+			r.addonIcon:SetPoint("LEFT", r, "LEFT", 158, 0)
 			r.addonIcon:Show()
 		else
 			r.addonIcon:Hide()
 		end
 		if d._b14Safety == "over" then
 			r.stopIcon:ClearAllPoints()
-			r.stopIcon:SetPoint("LEFT", r, "LEFT", iconBase + 14, 0)
+			r.stopIcon:SetPoint("LEFT", r, "LEFT", 172, 0)
 			r.stopIcon:SetVertexColor(1, 1, 1)
 			r.stopIcon:Show()
 		else
@@ -196,9 +195,9 @@ local function CreateRow(vi, parent)
 	r.diffFS    = MakeFS(r, C_DIFF)
 
 	r.stopIcon = r:CreateTexture(nil, "OVERLAY")
-	r.stopIcon:SetWidth(14)
-	r.stopIcon:SetHeight(14)
-	r.stopIcon:SetPoint("LEFT", r, "LEFT", 162, 0)
+	r.stopIcon:SetWidth(12)
+	r.stopIcon:SetHeight(12)
+	r.stopIcon:SetPoint("LEFT", r, "LEFT", 172, 0)
 	r.stopIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
 	r.stopIcon:Hide()
 
