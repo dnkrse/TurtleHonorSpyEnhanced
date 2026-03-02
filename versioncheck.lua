@@ -242,6 +242,24 @@ SlashCmdList["HSVER"] = function(msg)
 				DEFAULT_CHAT_FRAME:AddMessage(string.format("    %dd left: |cffffffff%d|r  (%.2fx)%s", d, t, b, marker), 0.6, 0.6, 0.6)
 			end
 		end
+	elseif msg == "races" then
+		local races = {}
+		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+		if hs and hs.currentStandings then
+			for name, player in pairs(hs.currentStandings) do
+				local r = player.race or "nil"
+				if not races[r] then races[r] = {} end
+				table.insert(races[r], name)
+			end
+		end
+		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Race tokens in database:", 1, 0.82, 0)
+		for race, names in pairs(races) do
+			local sample = names[1]
+			if table.getn(names) > 1 then sample = sample .. ", " .. names[2] end
+			DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cffffffff%s|r (%d players) e.g. %s", race, table.getn(names), sample), 0.7, 0.7, 0.7)
+		end
+		local _, myRaceToken = UnitRace("player")
+		DEFAULT_CHAT_FRAME:AddMessage("  Your race token: |cffffffff" .. tostring(myRaceToken) .. "|r", 0.87, 0.73, 0.27)
 	elseif msg == "users" or msg == "users reset" then
 		if msg == "users reset" then
 			THSE_AddonUsers = {}

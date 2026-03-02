@@ -524,6 +524,7 @@ local raceDisplayNames = {
 	NightElf = "Night Elf",
 	BloodElf = "High Elf",
 	HighElf = "High Elf",
+	Scourge = "Undead",
 }
 
 function HonorSpyStandings:BuildStandingsTable()
