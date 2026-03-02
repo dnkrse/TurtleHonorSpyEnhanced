@@ -107,6 +107,7 @@ function HonorSpy:OnEnable()
 	self:RegisterEvent("RAID_ROSTER_UPDATE");
 	self:RegisterEvent("PARTY_MEMBERS_CHANGED");
 	checkNeedReset();
+	self:ScheduleRepeatingEvent("HonorSpy_ResetCheck", checkNeedReset, 60)
 	if alliance[UnitRace("player")] == true
 	then
 		eFaction = horde;
