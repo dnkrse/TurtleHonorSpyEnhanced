@@ -855,17 +855,17 @@ function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player
 	store_player(playerName, player, sender)
 end
 
--- SEND on death: share randomly selected standings entries with group/guild.
--- In BG: 400 entries, GROUP only (BG peers benefit most, guild gets trickle).
--- Outside BG: 200 entries, GROUP + GUILD.
--- Sends are spread across ticks (10 per 0.2s) to avoid a Lua CPU spike.
--- A random 0-3s delay staggers bursts when multiple addon users die simultaneously.
-local DEATH_BURST_CAP_BG = 400
-local DEATH_BURST_CAP_NORMAL = 200
-local last_send_time = 0;
-local death_burst_queue = {}
+-- SEND on death (BG only): share standings entries with GROUP in round-robin.
+-- Shuffles all standings once, then cycles through DEATH_BURST_CAP entries per death.
+-- After all entries are sent, reshuffles for the next cycle. Guarantees every entry
+-- is sent exactly once before any repeats. Sends spread across ticks (10 per 0.2s).
+-- A random 0-3s delay staggers when multiple addon users die at once.
+local DEATH_BURST_CAP = 400
+local last_send_time = 0
+local death_burst_queue = {}   -- tick-by-tick send queue for current death
 local death_burst_idx = 0
-local death_burst_bg = false
+local death_pool = {}          -- shuffled snapshot of all standings keys
+local death_pool_idx = 0       -- position in the pool across deaths
 
 local function DeathBurstTick()
 	local standings = HonorSpy.db.realm.hs.currentStandings
@@ -878,9 +878,6 @@ local function DeathBurstTick()
 			local to_send = sanitize_player_for_comm(player)
 			if to_send then
 				debugSend(HonorSpy, "GROUP", pName, to_send)
-				if not death_burst_bg then
-					debugSend(HonorSpy, "GUILD", pName, to_send)
-				end
 			end
 		end
 		sent = sent + 1
@@ -893,27 +890,30 @@ local function DeathBurstTick()
 end
 
 local function DeathBurstStart()
-	-- Detect BG and pick cap accordingly
-	death_burst_bg = MiniMapBattlefieldFrame and MiniMapBattlefieldFrame.status == "active"
-	local cap = death_burst_bg and DEATH_BURST_CAP_BG or DEATH_BURST_CAP_NORMAL
+	-- Rebuild and reshuffle pool when exhausted or empty
+	if death_pool_idx >= table.getn(death_pool) then
+		death_pool = {}
+		for pName in pairs(HonorSpy.db.realm.hs.currentStandings) do
+			table.insert(death_pool, pName)
+		end
+		local n = table.getn(death_pool)
+		for i = n, 2, -1 do
+			local j = math.random(1, i)
+			death_pool[i], death_pool[j] = death_pool[j], death_pool[i]
+		end
+		death_pool_idx = 0
+	end
 
-	-- Collect all keys, shuffle, then take up to cap
-	local all_keys = {}
-	for pName in pairs(HonorSpy.db.realm.hs.currentStandings) do
-		table.insert(all_keys, pName)
-	end
-	local n = table.getn(all_keys)
-	-- Fisher-Yates shuffle
-	for i = n, 2, -1 do
-		local j = math.random(1, i)
-		all_keys[i], all_keys[j] = all_keys[j], all_keys[i]
-	end
-	-- Take first cap entries
+	-- Take next DEATH_BURST_CAP entries from the pool
 	death_burst_queue = {}
 	death_burst_idx = 0
-	if n < cap then cap = n end
+	local pool_size = table.getn(death_pool)
+	local cap = DEATH_BURST_CAP
+	local remaining = pool_size - death_pool_idx
+	if cap > remaining then cap = remaining end
 	for i = 1, cap do
-		table.insert(death_burst_queue, all_keys[i])
+		death_pool_idx = death_pool_idx + 1
+		table.insert(death_burst_queue, death_pool[death_pool_idx])
 	end
 	if table.getn(death_burst_queue) > 0 then
 		HonorSpy:ScheduleRepeatingEvent("HonorSpy_DeathBurstTick", DeathBurstTick, 0.2)
@@ -921,6 +921,7 @@ local function DeathBurstStart()
 end
 
 function HonorSpy:PLAYER_DEAD()
+	if not (MiniMapBattlefieldFrame and MiniMapBattlefieldFrame.status == "active") then return end
 	if (time() - last_send_time < 5*60) then return end
 	last_send_time = time()
 	local delay = math.random(0, 30) * 0.1
