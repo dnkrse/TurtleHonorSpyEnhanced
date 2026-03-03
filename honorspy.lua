@@ -922,7 +922,7 @@ end
 
 function HonorSpy:PLAYER_DEAD()
 	if not (MiniMapBattlefieldFrame and MiniMapBattlefieldFrame.status == "active") then return end
-	if (time() - last_send_time < 5*60) then return end
+	if (time() - last_send_time < 30) then return end
 	last_send_time = time()
 	local delay = math.random(0, 30) * 0.1
 	self:ScheduleEvent("HonorSpy_DeathBurst", DeathBurstStart, delay)
