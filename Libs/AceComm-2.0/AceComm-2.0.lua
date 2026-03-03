@@ -1712,6 +1712,24 @@ local function HandleMessage(prefix, message, distribution, sender, customChanne
 		chunk.time = GetTime()
 		chunk[current] = message
 		if current == max then
+			-- Validate all chunks arrived as strings before concat
+			local missing = nil
+			for i = 1, max do
+				if type(chunk[i]) ~= "string" then
+					missing = i
+					break
+				end
+			end
+			if missing then
+				if HonorSpyCommErrors then
+					local detail = "chunk " .. missing .. "/" .. max .. " is " .. type(chunk[missing]) .. " from " .. tostring(sender) .. " prefix=" .. tostring(prefix)
+					DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[HonorSpy CommErr]|r Dropped multi-chunk message: " .. detail)
+					if not HonorSpy_FailedChunks then HonorSpy_FailedChunks = {} end
+					table.insert(HonorSpy_FailedChunks, { type = "missing_chunk", detail = detail, time = time() })
+				end
+				queue[x] = del(queue[x])
+				return
+			end
 			table_setn(chunk, max)
 			message = table_concat(chunk)
 			queue[x] = del(queue[x])
