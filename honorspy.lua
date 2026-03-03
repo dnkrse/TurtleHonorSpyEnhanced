@@ -257,6 +257,8 @@ function healNaNData()
 	for name, player in pairs(standings) do
 		if type(player) == "table" then
 			local dominated = false
+			-- Remove "Unknown" placeholder entries (legacy data from before comm guard)
+			if name == "Unknown" or name == "" then dominated = true end
 			-- Fix NaN fields first
 			for k, v in pairs(player) do
 				if type(v) == "number" and v ~= v then
