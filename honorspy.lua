@@ -855,25 +855,76 @@ function HonorSpy:OnCommReceive(prefix, sender, distribution, playerName, player
 	store_player(playerName, player, sender)
 end
 
--- SEND on death: share all standings with group/guild
--- Each player is sent individually (~150 bytes, single chunk) to avoid multi-chunk
--- splitting that causes transport corruption under BG load.
--- A random 0-10s delay staggers bursts when multiple addon users die simultaneously.
+-- SEND on death: share randomly selected standings entries with group/guild.
+-- In BG: 400 entries, GROUP only (BG peers benefit most, guild gets trickle).
+-- Outside BG: 200 entries, GROUP + GUILD.
+-- Sends are spread across ticks (10 per 0.2s) to avoid a Lua CPU spike.
+-- A random 0-3s delay staggers bursts when multiple addon users die simultaneously.
+local DEATH_BURST_CAP_BG = 400
+local DEATH_BURST_CAP_NORMAL = 200
 local last_send_time = 0;
-local function DeathBurstSend()
-	for pName, player in pairs(HonorSpy.db.realm.hs.currentStandings) do
-		local to_send = sanitize_player_for_comm(player)
-		if to_send then
-			debugSend(HonorSpy, "GROUP", pName, to_send)
-			debugSend(HonorSpy, "GUILD", pName, to_send)
+local death_burst_queue = {}
+local death_burst_idx = 0
+local death_burst_bg = false
+
+local function DeathBurstTick()
+	local standings = HonorSpy.db.realm.hs.currentStandings
+	local sent = 0
+	while sent < 10 and death_burst_idx < table.getn(death_burst_queue) do
+		death_burst_idx = death_burst_idx + 1
+		local pName = death_burst_queue[death_burst_idx]
+		local player = standings[pName]
+		if player then
+			local to_send = sanitize_player_for_comm(player)
+			if to_send then
+				debugSend(HonorSpy, "GROUP", pName, to_send)
+				if not death_burst_bg then
+					debugSend(HonorSpy, "GUILD", pName, to_send)
+				end
+			end
 		end
+		sent = sent + 1
+	end
+	if death_burst_idx >= table.getn(death_burst_queue) then
+		HonorSpy:CancelScheduledEvent("HonorSpy_DeathBurstTick")
+		death_burst_queue = {}
+		death_burst_idx = 0
 	end
 end
+
+local function DeathBurstStart()
+	-- Detect BG and pick cap accordingly
+	death_burst_bg = MiniMapBattlefieldFrame and MiniMapBattlefieldFrame.status == "active"
+	local cap = death_burst_bg and DEATH_BURST_CAP_BG or DEATH_BURST_CAP_NORMAL
+
+	-- Collect all keys, shuffle, then take up to cap
+	local all_keys = {}
+	for pName in pairs(HonorSpy.db.realm.hs.currentStandings) do
+		table.insert(all_keys, pName)
+	end
+	local n = table.getn(all_keys)
+	-- Fisher-Yates shuffle
+	for i = n, 2, -1 do
+		local j = math.random(1, i)
+		all_keys[i], all_keys[j] = all_keys[j], all_keys[i]
+	end
+	-- Take first cap entries
+	death_burst_queue = {}
+	death_burst_idx = 0
+	if n < cap then cap = n end
+	for i = 1, cap do
+		table.insert(death_burst_queue, all_keys[i])
+	end
+	if table.getn(death_burst_queue) > 0 then
+		HonorSpy:ScheduleRepeatingEvent("HonorSpy_DeathBurstTick", DeathBurstTick, 0.2)
+	end
+end
+
 function HonorSpy:PLAYER_DEAD()
 	if (time() - last_send_time < 5*60) then return end
 	last_send_time = time()
-	local delay = math.random() * 10
-	self:ScheduleEvent("HonorSpy_DeathBurst", DeathBurstSend, delay)
+	local delay = math.random(0, 30) * 0.1
+	self:ScheduleEvent("HonorSpy_DeathBurst", DeathBurstStart, delay)
 end
 
 -- TRICKLE SYNC: send one standings entry every 0.6s to GROUP+GUILD while grouped.

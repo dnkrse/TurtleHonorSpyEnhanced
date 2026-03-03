@@ -999,17 +999,17 @@ do
 			return msg
 		end
 		-- Deserialization failed (error or nil result from corrupt data).
-		if HonorSpyCommDebug then
+		if HonorSpyCommErrors then
 			local errMsg = (not ret) and msg or "corrupt data (nil result)"
 			if not HonorSpy_FailedChunks then HonorSpy_FailedChunks = {} end
 			local n = table.getn(HonorSpy_FailedChunks) + 1
 			if n <= 20 then
 				local entry = HonorSpy_PendingChunk or {}
 				entry.err = errMsg
-				entry.time = GetTime()
+				entry.time = time()
 				HonorSpy_FailedChunks[n] = entry
 				table.setn(HonorSpy_FailedChunks, n)
-				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[HonorSpy CommDebug]|r FAIL #" .. n .. " from=" .. tostring(entry.sender) .. " err=[" .. tostring(entry.err) .. "] len=" .. tostring(entry.len) .. " | /script HonorSpy:DumpCommFailures() to export")
+				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[HonorSpy CommError]|r FAIL #" .. n .. " from=" .. tostring(entry.sender) .. " dist=" .. tostring(entry.dist) .. " err=[" .. tostring(entry.err) .. "] len=" .. tostring(entry.len) .. " | /script HonorSpy:DumpCommFailures() to export")
 			end
 		end
 	end
@@ -1720,18 +1720,20 @@ local function HandleMessage(prefix, message, distribution, sender, customChanne
 		end
 	end
 	-- HonorSpy comm debug: store chunk context so Deserialize error handler knows sender+prefix
-	if HonorSpyCommDebug then
+	if HonorSpyCommRawData or HonorSpyCommErrors then
 		local hexChunk = ""
 		local msgLen = string.len(message or "")
 		for i = 1, msgLen do
 			hexChunk = hexChunk .. string.format("%02X", string.byte(message, i))
 			if math.mod(i, 4) == 0 and i < msgLen then hexChunk = hexChunk .. " " end
 		end
-		HonorSpy_PendingChunk = { hex = hexChunk, len = msgLen, sender = sender, prefix = prefix }
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy CommDebug]|r Deserializing from |cffffffff" .. tostring(sender) .. "|r prefix=" .. tostring(prefix) .. " chunkLen=" .. msgLen)
+		HonorSpy_PendingChunk = { hex = hexChunk, len = msgLen, sender = sender, prefix = prefix, dist = distribution }
+		if HonorSpyCommRawData then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy CommDebug]|r Deserializing from |cffffffff" .. tostring(sender) .. "|r prefix=" .. tostring(prefix) .. " chunkLen=" .. msgLen)
+		end
 	end
 	message = Deserialize(message, AceComm.prefixMemoizations[prefix])
-	if HonorSpyCommDebug then
+	if HonorSpyCommRawData or HonorSpyCommErrors then
 		HonorSpy_PendingChunk = nil
 	end
 	local isTable = type(message) == "table"
@@ -1956,7 +1958,7 @@ function AceComm:CHAT_MSG_ADDON(prefix, message, distribution, sender)
 	end
 	message = Decode(message)
 	-- HonorSpy comm debug: only log after we know it's our prefix (avoids noise from other addons)
-	if HonorSpyCommDebug then
+	if HonorSpyCommRawData then
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[HonorSpy CommDebug]|r ADDON from |cffffffff" .. tostring(sender) .. "|r dist=" .. tostring(distribution) .. " prefix=" .. tostring(prefix) .. " msgLen=" .. string.len(message or ""))
 	end
 	return HandleMessage(prefix, message, distribution, sender)
