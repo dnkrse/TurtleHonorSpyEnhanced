@@ -173,7 +173,9 @@ local function StartInspecting(unitID)
 end
 
 function HonorSpy:INSPECT_HONOR_UPDATE()
-	if (inspectedPlayerName == nil or paused) then
+	if (inspectedPlayerName == nil) then return end
+	if (paused) then
+		inspectedPlayerName = nil;
 		return;
 	end
 
