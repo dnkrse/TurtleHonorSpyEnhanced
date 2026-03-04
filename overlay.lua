@@ -337,8 +337,75 @@ Frame.overshootDiv = overshootDiv
 Frame.overshootBtn = overshootBtn
 Frame.overshootText = overshootText
 
+-- ===== Flagged Player Warning =====
+local flaggedDiv = Frame:CreateTexture(nil, "ARTWORK")
+flaggedDiv:SetTexture(1, 1, 1, 0.15)
+flaggedDiv:SetWidth(INNER_W)
+flaggedDiv:SetHeight(1)
+flaggedDiv:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -150)
+flaggedDiv:Hide()
+
+local flaggedBtn = CreateFrame("Button", nil, Frame)
+flaggedBtn:SetWidth(INNER_W)
+flaggedBtn:SetHeight(24)
+flaggedBtn:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -157)
+flaggedBtn:Hide()
+
+local flaggedIcon = flaggedBtn:CreateTexture(nil, "ARTWORK")
+flaggedIcon:SetWidth(20)
+flaggedIcon:SetHeight(20)
+flaggedIcon:SetPoint("TOPLEFT", flaggedBtn, "TOPLEFT", 0, 0)
+flaggedIcon:SetTexture("Interface\\Icons\\Ability_Creature_Cursed_02")
+flaggedIcon:SetVertexColor(1, 0.3, 0.3)
+
+local flaggedText = flaggedBtn:CreateFontString(nil, "OVERLAY")
+flaggedText:SetFont("Fonts\\FRIZQT__.TTF", 8)
+flaggedText:SetPoint("TOPLEFT", flaggedBtn, "TOPLEFT", 23, -1)
+flaggedText:SetPoint("RIGHT", flaggedBtn, "RIGHT", -6, 0)
+flaggedText:SetJustifyH("LEFT")
+flaggedText:SetTextColor(1, 0.3, 0.3)
+flaggedText:SetText("You are flagged for not coordinating")
+
+local flaggedSubText = flaggedBtn:CreateFontString(nil, "OVERLAY")
+flaggedSubText:SetFont("Fonts\\FRIZQT__.TTF", 8)
+flaggedSubText:SetPoint("TOPLEFT", flaggedText, "BOTTOMLEFT", 0, -1)
+flaggedSubText:SetPoint("RIGHT", flaggedBtn, "RIGHT", -6, 0)
+flaggedSubText:SetJustifyH("LEFT")
+flaggedSubText:SetTextColor(1, 0.3, 0.3)
+flaggedSubText:SetText("Bracket 14 targets. |cff87ccff[More Info]|r")
+
+flaggedBtn:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_BOTTOM")
+	GameTooltip:ClearLines()
+	GameTooltip:AddLine("Flagged Player", 1, 0.3, 0.2)
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("You have been flagged for refusing to coordinate", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("Bracket 14 honor targets.", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("Only a small number of players each week share Bracket 14,", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("which awards the most rank points (RP). The closer everyone", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("in the bracket is in honor, the more RP each player", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("receives. High-rank players (Rank 12/Rank 13) depend on", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("these points to reach Rank 14 \226\128\148 a goal that takes weeks", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("of effort.", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("When someone farms far more honor than the group without", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("coordinating, it lowers everyone else's RP by hundreds", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine("per week while barely helping their own progression.", 0.6, 0.6, 0.6)
+	GameTooltip:AddLine(" ", 1, 1, 1)
+	GameTooltip:AddLine("If you agree to align on a shared target,", 0.87, 0.73, 0.27)
+	GameTooltip:AddLine("the flag will be removed.", 0.87, 0.73, 0.27)
+	GameTooltip:Show()
+end)
+flaggedBtn:SetScript("OnLeave", function()
+	GameTooltip:Hide()
+end)
+
+Frame.flaggedDiv = flaggedDiv
+Frame.flaggedBtn = flaggedBtn
+
 local FRAME_H_NORMAL = 150
 local FRAME_H_WARN   = 190
+local FRAME_H_EXTRA  = 40
 
 -- Safe target: median × time-scaled buffer (tightens as reset approaches).
 local OVERSHOOT = {}
@@ -353,7 +420,7 @@ function OVERSHOOT.GetDaysUntilReset()
 	local raw = 7 + reset_day - day
 	local daysUntil = raw - math.floor(raw / 7) * 7
 	if daysUntil == 0 then daysUntil = 7 end
-	return daysUntil - (h * 60 + m) / 1440
+	return daysUntil - (h * 60 + m - 15) / 1440
 end
 
 -- ===== Calculation Helpers (mirrors standings.lua logic) =====
@@ -638,12 +705,29 @@ local function UpdateOverlay()
 	if isOver then
 		overshootDiv:Show()
 		overshootBtn:Show()
-		Frame:SetHeight(FRAME_H_WARN)
 	else
 		overshootDiv:Hide()
 		overshootBtn:Hide()
-		Frame:SetHeight(FRAME_H_NORMAL)
 	end
+
+	-- === Flagged Player Warning ===
+	local isFlagged = THSE_FlaggedHashes and THSE_Hash and THSE_FlaggedHashes[THSE_Hash(playerName)] or false
+	local frameH = FRAME_H_NORMAL
+	if isOver then frameH = FRAME_H_WARN end
+	if isFlagged then
+		local yOff = isOver and -190 or -150
+		flaggedDiv:ClearAllPoints()
+		flaggedDiv:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, yOff)
+		flaggedBtn:ClearAllPoints()
+		flaggedBtn:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, yOff - 7)
+		flaggedDiv:Show()
+		flaggedBtn:Show()
+		frameH = frameH + FRAME_H_EXTRA
+	else
+		flaggedDiv:Hide()
+		flaggedBtn:Hide()
+	end
+	Frame:SetHeight(frameH)
 end
 
 -- ===== Initialization via events =====
@@ -689,6 +773,7 @@ end
 
 -- ===== Toggle function for minimap button =====
 function HonorSpyOverlay_Toggle()
+	if THSE_Blacklisted then return end
 	if Frame:IsVisible() then
 		Frame:Hide()
 		if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs then

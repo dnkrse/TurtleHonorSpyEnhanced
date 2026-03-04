@@ -7,14 +7,29 @@ HonorSpy:RegisterDefaults('realm', {
 		currentStandings = {},
 		last_reset = 0,
 		sort = L["ThisWeekHonor"],
-		limit = 750,
 		debugMenu = false,
 		commErrors = false,
 		commRawData = false,
 	}
 })
 
--- put this near the top of honorspy.lua
+-- Blacklist: hashed player names that are restricted to passive collection only
+function THSE_Hash(s)
+	local h = 5381
+	for i = 1, string.len(s) do
+		h = math.mod(h * 33 + string.byte(s, i), 4294967296)
+	end
+	return h
+end
+local THSE_BlacklistHashes = {
+}
+THSE_Blacklisted = false
+
+-- Flaglist: hashed player names shown with a warning marker to all users
+THSE_FlaggedHashes = {
+	[1605568483] = true,
+}
+
 local function safe_num(v)
   local n = tonumber(v) or 0
   if n ~= n then return 0 end  -- NaN guard (NaN ~= NaN)
@@ -118,6 +133,10 @@ function HonorSpy:OnEnable()
 	self:RegisterEvent("PLAYER_ENTERING_WORLD");
 	self:RegisterEvent("RAID_ROSTER_UPDATE");
 	self:RegisterEvent("PARTY_MEMBERS_CHANGED");
+	local me = UnitName("player")
+	if me and THSE_BlacklistHashes[THSE_Hash(me)] then
+		THSE_Blacklisted = true
+	end
 	checkNeedReset();
 	self:ScheduleRepeatingEvent("HonorSpy_ResetCheck", checkNeedReset, 60)
 	if alliance[UnitRace("player")] == true
@@ -244,7 +263,7 @@ function checkNeedReset()
 	local m = date("!%M");
 	local s = date("!%S");
 	local days_diff = (7 + (day - HonorSpy.db.realm.hs.reset_day)) - math.floor((7 + (day - HonorSpy.db.realm.hs.reset_day))/7) * 7;
-	local diff_in_seconds = s + m*60 + h*60*60 + days_diff*24*60*60 - 1; -- resets at midnight on turtle
+	local diff_in_seconds = s + m*60 + h*60*60 + days_diff*24*60*60 - 901; -- resets at 00:15 on turtle
 	if (diff_in_seconds > 0) then -- it is negative on reset_day untill midnight
 		local must_reset_on = time()-diff_in_seconds;
 		if (must_reset_on > HonorSpy.db.realm.hs.last_reset) then resetWeek(must_reset_on) end
@@ -360,6 +379,12 @@ function HonorSpy:OnHide()
 end
 
 -- CHAT COMMANDS
+local function blacklistGuard(fn)
+	return function(...)
+		if THSE_Blacklisted then return end
+		return fn(unpack(arg))
+	end
+end
 local options = { 
 	type='group',
 	args = {
@@ -367,13 +392,13 @@ local options = {
 			type = 'execute',
 			name = L['Show HonorSpy Standings'],
 			desc = L['Show HonorSpy Standings'],
-			func = function() HonorSpyStandings:Toggle() end
+			func = blacklistGuard(function() HonorSpyStandings:Toggle() end)
 		},
 		estimate = {
 			type = 'execute',
 			name = 'Honor Estimator',
 			desc = 'Open the Honor Estimator panel',
-			func = function() HonorSpyEstimator_Toggle() end
+			func = blacklistGuard(function() HonorSpyEstimator_Toggle() end)
 		},
 	}
 }
@@ -512,6 +537,7 @@ function HonorSpy:PLAYER_ENTERING_WORLD()
 	end)
 
 	updateMinimapButtonPosition()
+	if THSE_Blacklisted then minimapButton:Hide() end
 end
 
 function BuildMenu()
@@ -593,7 +619,7 @@ function BuildMenu()
 				end,
 				validate = days,
 			},
-			limit = {
+			--[[ limit = {
 				type = "text",
 				name = L["Limit Rows"],
 				desc = L["Limits number of rows shown in table"],
@@ -605,7 +631,7 @@ function BuildMenu()
 					local n = tonumber(v)
 					return n and n >= 0 and n < 10000
 				end
-			},
+			}, ]]
 			purge_data = {
 				type = "execute",
 				name = L["_ purge all data"],

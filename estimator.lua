@@ -537,6 +537,7 @@ end)
 
 -- ===== Toggle Function =====
 function HonorSpyEstimator_Toggle()
+	if THSE_Blacklisted then return end
 	if Frame:IsVisible() then
 		Frame:Hide()
 	else

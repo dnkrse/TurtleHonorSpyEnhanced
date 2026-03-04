@@ -126,10 +126,14 @@ local function ApplyRow(r, d)
 		else
 			r.addonIcon:Hide()
 		end
-		if d._b14Safety == "over" then
+		if d._b14Safety == "over" or d._flagged then
 			r.stopIcon:ClearAllPoints()
 			r.stopIcon:SetPoint("LEFT", r, "LEFT", 172, 0)
-			r.stopIcon:SetVertexColor(1, 1, 1)
+			if d._flagged then
+				r.stopIcon:SetVertexColor(1, 0.3, 0.3)
+			else
+				r.stopIcon:SetVertexColor(1, 1, 1)
+			end
 			r.stopIcon:Show()
 		else
 			r.stopIcon:Hide()
@@ -244,16 +248,12 @@ local function CreateRow(vi, parent)
 				local avg     = td._b14_avg or 0
 				local safeTarget = td._b14_safe_target or 0
 
-				local minH, maxH = players[1].honor, players[1].honor
-				for pi = 2, nSlots do
+				local rpBonusSum = 0
+				for pi = 1, nSlots do
 					local p = players[pi]
-					if p then
-						if p.honor < minH then minH = p.honor end
-						if p.honor > maxH then maxH = p.honor end
-					end
+					if p and p.award then rpBonusSum = rpBonusSum + (p.award - 12000) end
 				end
-				local spread = maxH - minH
-				local optPct = (avg > 0 and spread > 0) and math.max(0, math.floor((1 - spread / avg) * 100 + 0.5)) or 100
+				local optPct = (nSlots > 0) and math.max(0, math.floor(rpBonusSum / (1000 * nSlots) * 100 + 0.5)) or 100
 
 				GameTooltip:AddLine(" ", 1, 1, 1)
 				local optClr = optPct >= 80 and {0.27, 0.87, 0.47} or (optPct >= 50 and {0.87, 0.73, 0.27} or {1, 0.4, 0.4})
@@ -344,7 +344,27 @@ local function CreateRow(vi, parent)
 			end
 		end
 		local skullLine
-		if td._b14Safety then
+		if td._flagged then
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("     |cffdd4422-- Flagged Player --|r", 0.87, 0.27, 0.13)
+			skullLine = GameTooltip:NumLines()
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("This player refuses to coordinate bracket honor targets.", 0.9, 0.6, 0.6)
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("Only a small number of players each week share Bracket 14,", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("which awards the most rank points (RP). The closer everyone", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("in the bracket is in honor, the more RP each player", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("receives. High-rank players (Rank 12/Rank 13) depend on", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("these points to reach Rank 14 \226\128\148 a goal that takes weeks", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("of effort.", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("When someone farms far more honor than the group without", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("coordinating, it lowers everyone else's RP by hundreds", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("per week while barely helping their own progression.", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("If they agree to align on a shared target,", 0.87, 0.73, 0.27)
+			GameTooltip:AddLine("the flag will be removed.", 0.87, 0.73, 0.27)
+		end
+		if not skullLine and td._b14Safety then
 			local players = td._b14_players
 			local nSlots = td._b14_slots or 0
 			local safeTarget = td._b14_safe_target or 0
@@ -511,6 +531,7 @@ function HonorSpyStandings:Refresh()
 end
 
 function HonorSpyStandings:Toggle()
+	if THSE_Blacklisted then return end
 	if not mainFrame then
 		CreateMainFrame()
 		RestorePosition()
@@ -690,7 +711,7 @@ function HonorSpyStandings:RenderStandings()
 			local rawD = 7 + reset_day - wd
 			local daysUntil = rawD - math.floor(rawD / 7) * 7
 			if daysUntil == 0 then daysUntil = 7 end
-			local daysLeft = daysUntil - (hh * 60 + mm) / 1440
+			local daysLeft = daysUntil - (hh * 60 + mm - 15) / 1440
 			-- Safe target computed below after b14_avg is known
 			b14_daysLeft = daysLeft
 		end
@@ -771,7 +792,6 @@ function HonorSpyStandings:RenderStandings()
 	displayRows = {}
 
 	local prev_bracket = 0
-	local limit = tonumber(HonorSpy.db.realm.hs.limit) or 0
 
 	for i = 1, table.getn(t) do
 		local name, class, thisWeekHonor, lastWeekHonor, standing, RP, rank, last_checked, race, source, received = unpack(t[i])
@@ -886,20 +906,30 @@ function HonorSpyStandings:RenderStandings()
 
 		local displayName = string.len(name) > 12 and string.sub(name, 1, 12) .. ".." or name
 
+		local isFlagged = THSE_FlaggedHashes and THSE_Hash and THSE_FlaggedHashes[THSE_Hash(name)] or false
+		if isFlagged then
+			local r = "cc4444"
+			honorColor = r
+			class_color = r  -- local copy, safe to overwrite
+			curRankColor = r
+			nextRankColor = r
+			weekRPColor = r
+		end
+
 		table.insert(displayRows, {
 			type = "player",
 			index = i,
 			_my_bracket = my_bracket,
-			nameText   = C:Colorize("444444", i) .. " " .. C:Colorize(class_color, displayName),
+			nameText   = C:Colorize(isFlagged and "cc4444" or "444444", i) .. " " .. C:Colorize(isFlagged and "cc4444" or class_color, displayName),
 			statusText = onlineDot,
 			honorText  = C:Colorize(honorColor, string.format("%d", thisWeekHonor)),
-			rpAwText   = C:Colorize("ddbb44", string.format("%d", math.floor(award + 0.5))),
+			rpAwText   = C:Colorize(isFlagged and "cc4444" or "ddbb44", string.format("%d", math.floor(award + 0.5))),
 			totRPText  = C:Colorize(class_color, string.format("%d", RP)),
 			gainText   = C:Colorize(weekRPColor, weekRP >= 0 and string.format("+%d", weekRP) or string.format("%d", weekRP)),
 			cRankText  = C:Colorize(curRankColor, string.format("%d%%", curProgress)),
 			nRankText  = C:Colorize(nextRankColor, string.format("%d%%", EstProgress)),
-			diffText   = rankDiff > 0 and C:Colorize("ddbb44", "+" .. rankDiff)
-			             or (rankDiff < 0 and C:Colorize("ff6666", tostring(rankDiff)) or ""),
+			diffText   = rankDiff > 0 and C:Colorize(isFlagged and "cc4444" or "ddbb44", "+" .. rankDiff)
+			             or (rankDiff < 0 and C:Colorize(isFlagged and "cc4444" or "ff6666", tostring(rankDiff)) or ""),
 			rankIconPath   = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
 			rankIconAlpha  = rank > 0 and 1 or 0,
 			cRankIconPath  = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
@@ -910,6 +940,7 @@ function HonorSpyStandings:RenderStandings()
 			_class = class,
 			_race = race,
 			_rank = rank,
+			_flagged = isFlagged,
 			_lastWeekHonor = lastWeekHonor,
 			_standing = standing,
 			_last_seen_human = last_seen_human,
@@ -931,8 +962,6 @@ function HonorSpyStandings:RenderStandings()
 			_b14_next_pool = b14_next_pool,
 			_brk_abs = brk_abs,
 		})
-
-		if limit > 0 and i == limit then break end
 	end
 
 	-- Size frame to content (up to MAX_VISIBLE)
