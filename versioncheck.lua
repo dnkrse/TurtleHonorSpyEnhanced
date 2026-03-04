@@ -112,7 +112,7 @@ local timeSinceLastBroadcast = 0
 frame:SetScript("OnEvent", function()
 	if event == "CHAT_MSG_ADDON" then
 		if arg1 == MSG_PREFIX and arg2 and arg4 ~= UnitName("player") then
-			local msgType, payload = string.match(arg2, "^(%u+):(.+)$")
+			local _, _, msgType, payload = string.find(arg2, "^(%u+):(.+)$")
 			if not msgType then
 				-- legacy bare version string from older clients
 				msgType, payload = "VER", arg2
