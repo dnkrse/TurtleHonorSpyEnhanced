@@ -380,6 +380,7 @@ local cachedFX = nil
 local cachedPlayerRP = 0
 local cachedPlayerRank = 0
 local cachedPoolSize = 0
+local cachedObservedSize = 0
 local cachedBrkAbs = nil
 local cachedCapHonor = 0
 
@@ -389,7 +390,8 @@ local function RebuildPoolData()
 	if not ok or not t then return false end
 
 	cachedTable = t
-	cachedPoolSize = table.getn(t)
+	cachedObservedSize = table.getn(t)
+	cachedPoolSize = HonorSpyStandings:GetPoolSize(cachedObservedSize)
 
 	-- Build bracket boundaries
 	cachedBRK = {}
@@ -403,8 +405,9 @@ local function RebuildPoolData()
 
 	-- Helper: get CP at standing position
 	local function getCP(pos)
-		if pos >= 1 and pos <= cachedPoolSize and t[pos] then
-			return t[pos][3] or 0
+		local p = math.min(pos, cachedObservedSize)
+		if p >= 1 and t[p] then
+			return t[p][3] or 0
 		end
 		return 0
 	end
@@ -448,8 +451,8 @@ local function RebuildPoolData()
 	cachedPlayerRP = 0
 	cachedPlayerRank = 0
 	cachedPlayerHonor = 0
-	for i = 1, cachedPoolSize do
-		if t[i][1] == pName then
+	for i = 1, cachedObservedSize do
+		if t[i] and t[i][1] == pName then
 			cachedPlayerRP = t[i][6]
 			cachedPlayerRank = t[i][7]
 			cachedPlayerHonor = t[i][3] or 0
@@ -487,7 +490,7 @@ end
 local function FindStanding(hypotheticalHonor)
 	if not cachedTable then return 0, 1 end
 	local standing = cachedPoolSize + 1
-	for i = 1, cachedPoolSize do
+	for i = 1, cachedObservedSize do
 		if hypotheticalHonor >= (cachedTable[i][3] or 0) then
 			standing = i
 			break
@@ -747,9 +750,9 @@ local function UpdateEstimator(honorValue)
 
 		-- Build a temporary honor list as if player had capHonor (optimal)
 		-- vs honorValue (ego). Players between cap..ego in honor get shifted.
-		for i = 1, cachedPoolSize do
+		for i = 1, cachedObservedSize do
 			local row = cachedTable[i]
-			if row[1] ~= pName then
+			if row and row[1] ~= pName then
 				local h = row[3] or 0
 				-- This player's position stays the same in both scenarios
 				-- UNLESS player's honor value pushes them down.
@@ -852,8 +855,8 @@ function HonorSpyEstimator_Toggle()
 			local pName = UnitName("player")
 			local curHonor = 0
 			if cachedTable then
-				for i = 1, cachedPoolSize do
-					if cachedTable[i][1] == pName then
+				for i = 1, cachedObservedSize do
+					if cachedTable[i] and cachedTable[i][1] == pName then
 						curHonor = cachedTable[i][3] or 0
 						break
 					end
@@ -863,6 +866,14 @@ function HonorSpyEstimator_Toggle()
 			UpdateEstimator(curHonor)
 			resetBtn:Hide()
 			Frame:Show()
+		end
+	end
+end
+
+function HonorSpyEstimator_Refresh()
+	if Frame:IsVisible() then
+		if RebuildPoolData() then
+			UpdateEstimator(slider:GetValue())
 		end
 	end
 end

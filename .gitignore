@@ -13,3 +13,6 @@ Desktop.ini
 *.bak
 *.tmp
 *.orig
+
+# Local analysis
+analysis/

@@ -11,6 +11,9 @@ HonorSpy:RegisterDefaults('realm', {
 		commErrors = false,
 		commRawData = false,
 		versionDebug = false,
+		poolCorrection = false,
+		poolFactor = 15,
+		whatsNewSeen = false,
 	}
 })
 

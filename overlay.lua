@@ -41,6 +41,7 @@ closeBtn:SetHeight(20)
 closeBtn:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -2, -2)
 closeBtn:SetScript("OnClick", function()
 	Frame:Hide()
+	if HonorSpyPoolPanel then HonorSpyPoolPanel:Hide() end
 	if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs then
 		HonorSpy.db.realm.hs.overlayHidden = true
 	end
@@ -88,52 +89,283 @@ btnTable:SetScript("OnEnter", function()
 	GameTooltip:Show()
 end)
 btnTable:SetScript("OnLeave", function() GameTooltip:Hide() end)
-local menuFrame = CreateFrame("Frame", "HonorSpyOverlayMenu", UIParent, "UIDropDownMenuTemplate")
-local function OverlayMenu_Init()
-	local info
 
-	info = {}
-	info.text = "Show Full Table"
-	info.notCheckable = 1
-	info.func = function()
-		if HonorSpyStandings and HonorSpyStandings.Toggle then
-			HonorSpyStandings:Toggle()
-		end
-	end
-	UIDropDownMenu_AddButton(info)
+local btnPool = CreateFrame("Button", nil, Frame)
+btnPool:SetWidth(16)
+btnPool:SetHeight(13)
+btnPool:SetPoint("RIGHT", btnTable, "LEFT", -3, 0)
+local btnPoolFS = btnPool:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+btnPoolFS:SetAllPoints()
+btnPoolFS:SetJustifyH("CENTER")
+btnPoolFS:SetText("%")
+btnPoolFS:SetTextColor(0.55, 0.55, 0.55)
 
-	info = {}
-	info.text = "Honor Estimator"
-	info.notCheckable = 1
-	info.func = function()
-		if HonorSpyEstimator_Toggle then
-			HonorSpyEstimator_Toggle()
-		end
-	end
-	UIDropDownMenu_AddButton(info)
+-- ===== Pool Correction Panel =====
+local ppFactorEB, ppToggleFS  -- forward declare for closures
 
-	info = {}
-	info.text = "Close Overlay"
-	info.notCheckable = 1
-	info.func = function()
-		Frame:Hide()
-		if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs then
-			HonorSpy.db.realm.hs.overlayHidden = true
-		end
-	end
-	UIDropDownMenu_AddButton(info)
-
-	info = {}
-	info.text = "Cancel"
-	info.notCheckable = 1
-	info.func = function() end
-	UIDropDownMenu_AddButton(info)
+local function ApplyPoolFactor()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if not hs then return end
+	local val = tonumber(ppFactorEB:GetText()) or 15
+	val = math.floor(math.max(1, math.min(200, val)))
+	hs.poolFactor = val
+	ppFactorEB:SetText(tostring(val))
+	if HonorSpyStandings then HonorSpyStandings:RenderStandings() end
+	if HonorSpyOverlay_Refresh then HonorSpyOverlay_Refresh() end
+	if HonorSpyEstimator_Refresh then HonorSpyEstimator_Refresh() end
 end
-UIDropDownMenu_Initialize(menuFrame, OverlayMenu_Init, "MENU")
 
-Frame:SetScript("OnMouseUp", function()
+local function PoolRefreshAll()
+	if HonorSpyStandings then HonorSpyStandings:RenderStandings() end
+	if HonorSpyOverlay_Refresh then HonorSpyOverlay_Refresh() end
+	if HonorSpyEstimator_Refresh then HonorSpyEstimator_Refresh() end
+end
+
+function HonorSpyPoolPanel_Update()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if not (hs and ppSwitchDot and ppFactorEB) then return end
+	if hs.poolCorrection then
+		ppSwitchDot:SetTexture(0.2, 0.9, 0.3, 1)
+		ppSwitchLabel:SetText("ON")
+		ppSwitchLabel:SetTextColor(0.2, 0.9, 0.3)
+		btnPoolFS:SetTextColor(0.2, 1.0, 0.2)
+	else
+		ppSwitchDot:SetTexture(0.5, 0.5, 0.5, 1)
+		ppSwitchLabel:SetText("OFF")
+		ppSwitchLabel:SetTextColor(0.5, 0.5, 0.5)
+		btnPoolFS:SetTextColor(0.55, 0.55, 0.55)
+	end
+	ppFactorEB:SetText(tostring(hs.poolFactor or 15))
+end
+
+local poolPanel = CreateFrame("Frame", "HonorSpyPoolPanel", UIParent)
+poolPanel:SetWidth(210)
+poolPanel:SetHeight(170)
+poolPanel:SetFrameStrata("DIALOG")
+poolPanel:SetClampedToScreen(true)
+poolPanel:SetBackdrop({
+	bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+	edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+	tile = true, tileSize = 16, edgeSize = 16,
+	insets = { left = 4, right = 4, top = 4, bottom = 4 },
+})
+poolPanel:SetBackdropColor(0, 0, 0, 0.92)
+poolPanel:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+poolPanel:SetPoint("TOPLEFT", Frame, "BOTTOMLEFT", 0, -2)
+poolPanel:Hide()
+
+-- Header: close button
+local ppClose = CreateFrame("Button", nil, poolPanel, "UIPanelCloseButton")
+ppClose:SetWidth(20)
+ppClose:SetHeight(20)
+ppClose:SetPoint("TOPRIGHT", poolPanel, "TOPRIGHT", -2, -2)
+ppClose:SetScript("OnClick", function() poolPanel:Hide() end)
+
+-- Header: title (as a button for hover tooltip)
+local ppTitleBtn = CreateFrame("Button", nil, poolPanel)
+ppTitleBtn:SetWidth(90)
+ppTitleBtn:SetHeight(14)
+ppTitleBtn:SetPoint("TOPLEFT", poolPanel, "TOPLEFT", 8, -8)
+local ppTitle = ppTitleBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ppTitle:SetAllPoints()
+ppTitle:SetJustifyH("LEFT")
+ppTitle:SetText("Pool Correction")
+ppTitle:SetTextColor(1, 0.82, 0)
+ppTitleBtn:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+	GameTooltip:SetText("Pool Correction")
+	GameTooltip:AddLine("The addon only knows players it has", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("personally seen. Anyone who never", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("crossed paths with an addon user is", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("missing, so the true pool is larger.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("This correction adds them back in.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("Example: a lvl 30 gets one kill in a", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("BG with no addon users and leaves.", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("He counts in the weekly pool but is", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("completely invisible to this addon.", 0.55, 0.55, 0.55)
+	GameTooltip:Show()
+end)
+ppTitleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+-- Header: toggle beside title
+local ppToggle = CreateFrame("Button", nil, poolPanel)
+ppToggle:SetWidth(28)
+ppToggle:SetHeight(14)
+ppToggle:SetPoint("LEFT", ppTitleBtn, "RIGHT", 4, 0)
+
+ppSwitchDot = ppToggle:CreateTexture(nil, "OVERLAY")
+ppSwitchDot:SetWidth(6)
+ppSwitchDot:SetHeight(6)
+ppSwitchDot:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+ppSwitchDot:SetPoint("LEFT", ppToggle, "LEFT", 0, 0)
+
+ppSwitchLabel = ppToggle:CreateFontString(nil, "OVERLAY")
+ppSwitchLabel:SetFont("Fonts\\FRIZQT__.TTF", 9)
+ppSwitchLabel:SetPoint("LEFT", ppSwitchDot, "RIGHT", 3, 0)
+
+ppToggle:SetScript("OnEnter", function()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs and hs.poolCorrection then
+		ppSwitchLabel:SetTextColor(0.4, 1.0, 0.5)
+		ppSwitchDot:SetTexture(0.4, 1.0, 0.5, 1)
+	else
+		ppSwitchLabel:SetTextColor(0.8, 0.8, 0.8)
+		ppSwitchDot:SetTexture(0.8, 0.8, 0.8, 1)
+	end
+end)
+ppToggle:SetScript("OnLeave", function()
+	HonorSpyPoolPanel_Update()
+end)
+
+ppToggle:SetScript("OnClick", function()
+	local hs = HonorSpy.db.realm.hs
+	hs.poolCorrection = not hs.poolCorrection
+	HonorSpyPoolPanel_Update()
+	PoolRefreshAll()
+end)
+
+-- Separator line
+local ppSep = poolPanel:CreateTexture(nil, "ARTWORK")
+ppSep:SetHeight(1)
+ppSep:SetPoint("TOPLEFT",  poolPanel, "TOPLEFT",  6, -22)
+ppSep:SetPoint("TOPRIGHT", poolPanel, "TOPRIGHT", -6, -22)
+ppSep:SetTexture(0.4, 0.4, 0.4, 0.8)
+
+-- Description text
+local ppDesc = poolPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ppDesc:SetPoint("TOPLEFT",  poolPanel, "TOPLEFT",  8, -28)
+ppDesc:SetPoint("TOPRIGHT", poolPanel, "TOPRIGHT", -8, -28)
+ppDesc:SetJustifyH("LEFT")
+ppDesc:SetTextColor(0.75, 0.75, 0.75)
+ppDesc:SetText("|cffddaa44Recommended Value: 15%|r\n" ..
+	"Based on data from previous weeks,\n" ..
+	"15% is a proven safe factor to use.\n" ..
+	"Your actual RP earned will be at\n" ..
+	"least as high as the estimate shows.\n\n" ..
+	"|cffff6633Caution above 20%|r\n" ..
+	"The bracket boundaries shift further\n" ..
+	"than the real data supports. You may\n" ..
+	"end up with less progress than\n" ..
+	"calculated from the addon.")
+
+-- Second separator
+local ppSep2 = poolPanel:CreateTexture(nil, "ARTWORK")
+ppSep2:SetHeight(1)
+ppSep2:SetPoint("TOPLEFT",  poolPanel, "TOPLEFT",  6, -140)
+ppSep2:SetPoint("TOPRIGHT", poolPanel, "TOPRIGHT", -6, -140)
+ppSep2:SetTexture(0.4, 0.4, 0.4, 0.8)
+
+-- Controls row: Extra [-] [n] [+] %
+local ppLabel = poolPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ppLabel:SetPoint("BOTTOMLEFT", poolPanel, "BOTTOMLEFT", 8, 12)
+ppLabel:SetText("Correction:")
+ppLabel:SetTextColor(0.7, 0.7, 0.7)
+
+local ppMinus = CreateFrame("Button", nil, poolPanel, "UIPanelButtonTemplate")
+ppMinus:SetWidth(20)
+ppMinus:SetHeight(20)
+ppMinus:SetPoint("LEFT", ppLabel, "RIGHT", 4, 0)
+ppMinus:SetText("-")
+ppMinus:SetScript("OnClick", function()
+	local hs = HonorSpy.db.realm.hs
+	hs.poolFactor = math.max(1, (hs.poolFactor or 15) - 1)
+	HonorSpyPoolPanel_Update()
+	PoolRefreshAll()
+end)
+
+
+ppFactorEB = CreateFrame("EditBox", "HonorSpyPoolFactorEB", poolPanel, "InputBoxTemplate")
+ppFactorEB:SetWidth(34)
+ppFactorEB:SetHeight(14)
+ppFactorEB:SetPoint("LEFT", ppMinus, "RIGHT", 2, 0)
+ppFactorEB:SetAutoFocus(false)
+ppFactorEB:SetNumeric(true)
+ppFactorEB:SetMaxLetters(3)
+ppFactorEB:SetJustifyH("CENTER")
+ppFactorEB:SetScript("OnEnterPressed", function() ApplyPoolFactor(); ppFactorEB:ClearFocus() end)
+ppFactorEB:SetScript("OnEditFocusLost", ApplyPoolFactor)
+ppFactorEB:SetScript("OnEscapePressed", function() ppFactorEB:ClearFocus() end)
+
+local ppPlus = CreateFrame("Button", nil, poolPanel, "UIPanelButtonTemplate")
+ppPlus:SetWidth(20)
+ppPlus:SetHeight(20)
+ppPlus:SetPoint("LEFT", ppFactorEB, "RIGHT", 2, 0)
+ppPlus:SetText("+")
+ppPlus:SetScript("OnClick", function()
+	local hs = HonorSpy.db.realm.hs
+	hs.poolFactor = math.min(200, (hs.poolFactor or 15) + 1)
+	HonorSpyPoolPanel_Update()
+	PoolRefreshAll()
+end)
+
+
+local ppPctLabel = poolPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ppPctLabel:SetPoint("LEFT", ppPlus, "RIGHT", 2, 0)
+ppPctLabel:SetText("%")
+ppPctLabel:SetTextColor(0.7, 0.7, 0.7)
+
+-- Tooltip on editbox
+ppFactorEB:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+	GameTooltip:SetText("Hidden player estimate (%)")
+	GameTooltip:AddLine("Percentage of extra players to add to", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("the pool. 15 means the real pool is", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("assumed to be 15% larger than observed.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("Type a number and press Enter to apply.", 0.7, 0.7, 0.7)
+	GameTooltip:Show()
+end)
+ppFactorEB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+-- Tooltip on the % header button
+btnPool:SetScript("OnEnter", function()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs and hs.poolCorrection then
+		btnPoolFS:SetTextColor(0.4, 1.0, 0.4)
+	else
+		btnPoolFS:SetTextColor(0.8, 0.8, 0.8)
+	end
+	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMRIGHT")
+	GameTooltip:SetText("Pool Correction")
+	GameTooltip:AddLine("The addon only knows players it has", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("personally seen. Anyone who never", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("crossed paths with an addon user is", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("missing, so the true pool is larger.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("This correction adds them back in.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("Example: a lvl 30 gets one kill in a", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("BG with no addon users and leaves.", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("He counts in the weekly pool but is", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine("completely invisible to this addon.", 0.55, 0.55, 0.55)
+	GameTooltip:AddLine(" ", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("|cffaaaaaaLeft-click|r to open settings.", 0.7, 0.7, 0.7)
+	GameTooltip:AddLine("|cffaaaaaaRight-click|r to toggle on/off.", 0.7, 0.7, 0.7)
+	GameTooltip:Show()
+end)
+btnPool:SetScript("OnLeave", function()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs and hs.poolCorrection then
+		btnPoolFS:SetTextColor(0.2, 1.0, 0.2)
+	else
+		btnPoolFS:SetTextColor(0.55, 0.55, 0.55)
+	end
+	GameTooltip:Hide()
+end)
+
+btnPool:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+btnPool:SetScript("OnClick", function()
 	if arg1 == "RightButton" then
-		ToggleDropDownMenu(1, nil, menuFrame, "cursor", 0, 0)
+		local hs = HonorSpy.db.realm.hs
+		hs.poolCorrection = not hs.poolCorrection
+		HonorSpyPoolPanel_Update()
+		PoolRefreshAll()
+	else
+		if poolPanel:IsVisible() then
+			poolPanel:Hide()
+		else
+			HonorSpyPoolPanel_Update()
+			poolPanel:Show()
+		end
 	end
 end)
 
@@ -314,11 +546,16 @@ overshootBtn:SetScript("OnEnter", function()
 	GameTooltip:ClearLines()
 	GameTooltip:AddLine("Above Recommended Target", 1, 0.3, 0.2)
 	GameTooltip:AddLine(" ", 1, 1, 1)
-	GameTooltip:AddLine("You're already safely in bracket 14 if the reset", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("happened right now. Farming further above the recommended", 0.9, 0.9, 0.9)
-	GameTooltip:AddLine("target spreads the bracket and lowers RP for others.", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("The recommended target is the honor amount", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("that lets other bracket 14 players catch up", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("to you. When everyone is closer in honor,", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("you all earn more rank points (up to 13,000", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("RP each). Consider slowing down at this", 0.9, 0.9, 0.9)
+	GameTooltip:AddLine("point to let others catch up.", 0.9, 0.9, 0.9)
 	GameTooltip:AddLine(" ", 1, 1, 1)
-	GameTooltip:AddLine("Coordinate with your bracket on a shared honor target.", 0.87, 0.73, 0.27)
+	GameTooltip:AddLine("This target moves as more players farm", 0.87, 0.73, 0.27)
+	GameTooltip:AddLine("honor throughout the week. Check back", 0.87, 0.73, 0.27)
+	GameTooltip:AddLine("regularly until the weekly reset.", 0.87, 0.73, 0.27)
 	if overshootState.excess > 0 then
 		local myHonorTotal = overshootState.excess + overshootState.target
 		GameTooltip:AddLine(" ", 1, 1, 1)
@@ -456,7 +693,8 @@ local function UpdateOverlay()
 
 	local ok, t = pcall(function() return HonorSpyStandings:BuildStandingsTable() end)
 	if not ok or not t then return end
-	local pool_size = table.getn(t)
+	local observed  = table.getn(t)
+	local pool_size = HonorSpyStandings:GetPoolSize(observed)
 
 	-- Build bracket boundaries
 	local BRK = {}
@@ -466,8 +704,9 @@ local function UpdateOverlay()
 
 	-- Helper: get CP at standing position
 	local function getCP(pos)
-		if pos >= 1 and pos <= pool_size and t[pos] then
-			return t[pos][3] or 0
+		local p = math.min(pos, observed)
+		if p >= 1 and t[p] then
+			return t[p][3] or 0
 		end
 		return 0
 	end
@@ -514,7 +753,7 @@ local function UpdateOverlay()
 	-- Find current player in standings
 	local myStanding = 0
 	local myData = nil
-	for i = 1, pool_size do
+	for i = 1, observed do
 		if t[i][1] == playerName then
 			myStanding = i
 			myData = t[i]
@@ -613,7 +852,12 @@ local function UpdateOverlay()
 		if myStanding > brk_abs[b] then break end
 		myBracket = b
 	end
-	standLeft:SetText("Standing  |cffffffff#" .. myStanding .. " / " .. pool_size .. "|r")
+	local poolTag = ""
+	if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	   and HonorSpy.db.realm.hs.poolCorrection then
+		poolTag = " |cff22dd22*|r"
+	end
+	standLeft:SetText("Standing  |cffffffff#" .. myStanding .. " / " .. pool_size .. "|r" .. poolTag)
 	standRight:SetText("Bracket " .. myBracket)
 
 	-- === Section 3: Next Week Estimate ===
@@ -763,6 +1007,13 @@ Frame:SetScript("OnEvent", function()
 			Frame:Show()
 		end
 		UpdateOverlay()
+		HonorSpyPoolPanel_Update()
+
+		-- Show What's New popup once
+		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+		if hs and not hs.whatsNewSeen and HonorSpyWhatsNewFrame then
+			HonorSpyWhatsNewFrame:Show()
+		end
 	end
 end)
 
@@ -775,11 +1026,114 @@ if HonorSpyStandings and HonorSpyStandings.Refresh then
 	end
 end
 
+-- ===== What's New Popup =====
+local wnf = CreateFrame("Frame", "HonorSpyWhatsNewFrame", UIParent)
+wnf:SetWidth(420)
+wnf:SetHeight(340)
+wnf:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+wnf:SetFrameStrata("FULLSCREEN_DIALOG")
+wnf:SetMovable(true)
+wnf:EnableMouse(true)
+wnf:RegisterForDrag("LeftButton")
+wnf:SetScript("OnDragStart", function() this:StartMoving() end)
+wnf:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
+wnf:SetBackdrop({
+	bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+	edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+	tile = true, tileSize = 16, edgeSize = 16,
+	insets = { left = 4, right = 4, top = 4, bottom = 4 },
+})
+wnf:SetBackdropColor(0, 0, 0, 0.92)
+wnf:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+wnf:Hide()
+
+local wnTitle = wnf:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+wnTitle:SetPoint("TOP", wnf, "TOP", 0, -12)
+wnTitle:SetText("|cffFFD100TurtleHonorSpyEnhanced — What's New|r")
+
+local wnClose = CreateFrame("Button", nil, wnf, "UIPanelCloseButton")
+wnClose:SetWidth(24)
+wnClose:SetHeight(24)
+wnClose:SetPoint("TOPRIGHT", wnf, "TOPRIGHT", -2, -2)
+wnClose:SetScript("OnClick", function()
+	wnf:Hide()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs then hs.whatsNewSeen = true end
+end)
+
+local wnSep = wnf:CreateTexture(nil, "ARTWORK")
+wnSep:SetHeight(1)
+wnSep:SetPoint("TOPLEFT",  wnf, "TOPLEFT",  10, -32)
+wnSep:SetPoint("TOPRIGHT", wnf, "TOPRIGHT", -10, -32)
+wnSep:SetTexture(0.4, 0.4, 0.4, 0.8)
+
+local wnVerLabel = wnf:CreateFontString(nil, "OVERLAY")
+wnVerLabel:SetFont("Fonts\\FRIZQT__.TTF", 13)
+wnVerLabel:SetPoint("TOPLEFT", wnSep, "BOTTOMLEFT", 0, -10)
+wnVerLabel:SetTextColor(0.6, 0.5, 0.8)
+wnVerLabel:SetText("Version 1.3")
+
+local wnDiv0 = wnf:CreateTexture(nil, "ARTWORK")
+wnDiv0:SetHeight(1)
+wnDiv0:SetWidth(70)
+wnDiv0:SetPoint("TOPLEFT", wnVerLabel, "BOTTOMLEFT", 0, -4)
+wnDiv0:SetTexture(0.4, 0.4, 0.4, 0.5)
+
+local wnBody1 = wnf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+wnBody1:SetWidth(396)
+wnBody1:SetHeight(0)
+wnBody1:SetPoint("TOPLEFT", wnDiv0, "BOTTOMLEFT", 0, -6)
+wnBody1:SetJustifyH("LEFT")
+wnBody1:SetJustifyV("TOP")
+wnBody1:SetSpacing(2)
+wnBody1:SetText(
+	"|cffFFD100Pool Correction|r  |cff666666(% button on overlay)|r\n" ..
+	"|cffbbbbbbThe addon can only see players that it or other addon users have encountered. Many players with a few honor kills are never seen, so the true PvP pool is larger than what's shown.\n\nPool Correction adds an estimated percentage of hidden players to give you more accurate bracket boundaries and rank point estimates.|r\n" ..
+	"|cff88cc44Click the |cff22dd22%|r|cff88cc44 button on the overlay to configure.|r"
+)
+
+local wnDiv1 = wnf:CreateTexture(nil, "ARTWORK")
+wnDiv1:SetHeight(1)
+wnDiv1:SetWidth(198)
+wnDiv1:SetPoint("TOP", wnBody1, "BOTTOM", 0, -8)
+wnDiv1:SetTexture(0.4, 0.4, 0.4, 0.5)
+
+local wnBody2 = wnf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+wnBody2:SetWidth(396)
+wnBody2:SetHeight(0)
+wnBody2:SetPoint("TOP", wnDiv1, "BOTTOM", 0, -8)
+wnBody2:SetPoint("LEFT", wnBody1, "LEFT", 0, 0)
+wnBody2:SetJustifyH("LEFT")
+wnBody2:SetJustifyV("TOP")
+wnBody2:SetSpacing(2)
+wnBody2:SetText(
+	"|cffFFD100RP Curve Graph|r  |cff666666(in the estimator)|r\n" ..
+	"|cffbbbbbbThe estimator now shows a graph of how rank points change as you farm more honor. You can see exactly where the sweet spot is and where additional farming gives diminishing returns. Drag the slider to explore.|r"
+)
+
+local wnDiv2 = wnf:CreateTexture(nil, "ARTWORK")
+wnDiv2:SetHeight(1)
+wnDiv2:SetPoint("TOPLEFT",  wnf, "BOTTOMLEFT",  10, 42)
+wnDiv2:SetPoint("TOPRIGHT", wnf, "BOTTOMRIGHT", -10, 42)
+wnDiv2:SetTexture(0.4, 0.4, 0.4, 0.5)
+
+local wnGotIt = CreateFrame("Button", nil, wnf, "UIPanelButtonTemplate")
+wnGotIt:SetWidth(80)
+wnGotIt:SetHeight(22)
+wnGotIt:SetPoint("BOTTOM", wnf, "BOTTOM", 0, 12)
+wnGotIt:SetText("Got it!")
+wnGotIt:SetScript("OnClick", function()
+	wnf:Hide()
+	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hs then hs.whatsNewSeen = true end
+end)
+
 -- ===== Toggle function for minimap button =====
 function HonorSpyOverlay_Toggle()
 	if THSE_Blacklisted then return end
 	if Frame:IsVisible() then
 		Frame:Hide()
+		poolPanel:Hide()
 		if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs then
 			HonorSpy.db.realm.hs.overlayHidden = true
 		end
@@ -788,6 +1142,12 @@ function HonorSpyOverlay_Toggle()
 		if HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs then
 			HonorSpy.db.realm.hs.overlayHidden = false
 		end
+		UpdateOverlay()
+	end
+end
+
+function HonorSpyOverlay_Refresh()
+	if Frame:IsVisible() then
 		UpdateOverlay()
 	end
 end

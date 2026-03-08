@@ -42,7 +42,8 @@ function HonorSpy:ExportCSV()
 	local editbox = _G["ARLCopyEdit"]
 
 	local data = HonorSpyStandings:BuildStandingsTable();
-	local pool_size = table.getn(data)
+	local observed    = table.getn(data)
+	local pool_size   = HonorSpyStandings:GetPoolSize(observed)
 
 	-- Bracket boundary percentages (0-indexed, matching vmangos server)
 	local BRK = {}
@@ -59,7 +60,7 @@ function HonorSpy:ExportCSV()
 	for k = 3, 14 do RankThresholds[k] = (k - 2) * 5000 end
 
 	local function getCP(pos)
-		if pos >= 1 and pos <= pool_size and data[pos] then
+		if pos >= 1 and pos <= observed and data[pos] then
 			return data[pos][3] or 0
 		end
 		return 0

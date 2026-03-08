@@ -421,6 +421,10 @@ SlashCmdList["HSVER"] = function(msg)
 			end
 		end
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r " .. count .. " known addon user(s).", 1, 0.82, 0)
+	elseif cmd == "whatsnew" then
+		if HonorSpyWhatsNewFrame then
+			HonorSpyWhatsNewFrame:Show()
+		end
 	else
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r v" .. MY_VERSION, 1, 0.82, 0)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver test — simulate update available", 0.7, 0.7, 0.7)
@@ -437,5 +441,6 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users bg — show raid members not on the current version", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users req — manually send a version request to guild/party/raid", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver whatsnew — show the What's New window", 0.7, 0.7, 0.7)
 	end
 end

@@ -45,6 +45,7 @@ local C_DIFF   = {x = 516, w = 25,  j = "RIGHT"}
 -- State
 -----------------------------------------------------------------------
 local mainFrame, bodyFrame
+local poolBtn, poolBtnFS   -- pool correction toggle button
 local rows = {}         -- fixed pool of MAX_VISIBLE row frames
 local scrollOffset = 0  -- index of first visible data row (0-based)
 local displayRows = {}  -- built by RenderStandings, read by UpdateRows
@@ -66,6 +67,20 @@ local function MakeIcon(parent, col, size)
 	tex:SetHeight(size)
 	tex:SetPoint("LEFT", parent, "LEFT", col.x, 0)
 	return tex
+end
+
+local function UpdatePoolBtn()
+	if not poolBtnFS then return end
+	local on = HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	           and HonorSpy.db.realm.hs.poolCorrection
+	if on then
+		poolBtnFS:SetTextColor(0.2, 1.0, 0.2)
+		local factor = (HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs and HonorSpy.db.realm.hs.poolFactor) or 15
+		poolBtnFS:SetText("+" .. factor .. "%")
+	else
+		poolBtnFS:SetTextColor(0.55, 0.55, 0.55)
+		poolBtnFS:SetText("+0%")
+	end
 end
 
 -----------------------------------------------------------------------
@@ -394,10 +409,16 @@ local function CreateRow(vi, parent)
 			GameTooltip:AddLine(" ", 1, 1, 1)
 			GameTooltip:AddLine("     |cffdd4422-- Above Recommended Target --|r", 0.87, 0.27, 0.13)
 			skullLine = GameTooltip:NumLines()
-			GameTooltip:AddLine("You're already safely in bracket 14 if the reset", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("happened right now. Farming further above the recommended", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("target spreads the bracket and lowers RP for others.", 0.6, 0.6, 0.6)
-			GameTooltip:AddLine("Coordinate with your bracket on a shared honor target.", 0.87, 0.73, 0.27)
+			GameTooltip:AddLine("The recommended target is the honor amount", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("that lets other bracket 14 players catch up", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("to you. When everyone is closer in honor,", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("you all earn more rank points (up to 13,000", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("RP each). Consider slowing down at this", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine("point to let others catch up.", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("This target moves as more players farm", 0.87, 0.73, 0.27)
+			GameTooltip:AddLine("honor throughout the week. Check back", 0.87, 0.73, 0.27)
+			GameTooltip:AddLine("regularly until the weekly reset.", 0.87, 0.73, 0.27)
 			GameTooltip:AddLine(" ", 1, 1, 1)
 			GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
 			GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
@@ -491,6 +512,48 @@ local function CreateMainFrame()
 	HdrText(C_NRANK, "Next")
 	HdrText(C_DIFF,  "")
 
+	-- pool correction toggle button (right-aligned in header)
+	poolBtn = CreateFrame("Button", nil, hdr)
+	poolBtn:SetWidth(72)
+	poolBtn:SetHeight(HDR_H)
+	poolBtn:SetPoint("RIGHT", hdr, "RIGHT", 0, 0)
+	poolBtnFS = poolBtn:CreateFontString(nil, "OVERLAY", "GameTooltipText")
+	poolBtnFS:SetAllPoints()
+	poolBtnFS:SetJustifyH("RIGHT")
+	UpdatePoolBtn()
+	poolBtn:SetScript("OnEnter", function()
+		GameTooltip:SetOwner(this, "ANCHOR_BOTTOM")
+		GameTooltip:SetText("Pool Correction")
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddLine("This addon only knows about players it", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("has personally seen — in a BG, inspect,", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("or from another addon user nearby.", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("Anyone who never crossed paths with an", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("addon user is missing from the pool,", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("making the true pool larger than shown.", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddLine("When active, the estimated missing", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("players are added back into the bracket", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine("math so rank estimates are more accurate.", 0.75, 0.75, 0.75)
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddLine("Example: a level 30 joins one BG, gets", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine("a single kill, and leaves. If no addon", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine("user was in that BG, he counts toward", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine("the weekly pool but is invisible here.", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddLine("Click to toggle on/off.", 0.55, 0.55, 0.55)
+		GameTooltip:Show()
+	end)
+	poolBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	poolBtn:SetScript("OnClick", function()
+		local hs = HonorSpy.db.realm.hs
+		hs.poolCorrection = not hs.poolCorrection
+		HonorSpyStandings:RenderStandings()
+		if HonorSpyOverlay_Refresh then HonorSpyOverlay_Refresh() end
+		if HonorSpyEstimator_Refresh then HonorSpyEstimator_Refresh() end
+		if HonorSpyPoolPanel_Update then HonorSpyPoolPanel_Update() end
+	end)
+
 	-- body area (rows live here, no ScrollFrame)
 	bodyFrame = CreateFrame("Frame", "HSSBody", mainFrame)
 	bodyFrame:SetPoint("TOPLEFT", hdr, "BOTTOMLEFT", 0, -2)
@@ -563,6 +626,15 @@ local raceDisplayNames = {
 	Scourge = "Undead",
 }
 
+function HonorSpyStandings:GetPoolSize(observed)
+	if HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	   and HonorSpy.db.realm.hs.poolCorrection then
+		local factor = HonorSpy.db.realm.hs.poolFactor or 15
+		return math.floor(observed * (1 + factor / 100))
+	end
+	return observed
+end
+
 function HonorSpyStandings:BuildStandingsTable()
 	local t = {}
 	local eFaction = {}
@@ -627,10 +699,12 @@ end
 -----------------------------------------------------------------------
 function HonorSpyStandings:RenderStandings()
 	if not mainFrame then return end
+	UpdatePoolBtn()
 
 	local t = self:BuildStandingsTable()
 	local onlineFriends, bgFriends, allFriends = GetOnlineFriends()
-	local pool_size = table.getn(t)
+	local observed    = table.getn(t)
+	local pool_size   = self:GetPoolSize(observed)
 
 	-- Bracket boundary percentages
 	local BRK = {}
@@ -654,7 +728,8 @@ function HonorSpyStandings:RenderStandings()
 	for k = 3, 14 do RankThresholds[k] = (k - 2) * 5000 end
 
 	local function getCP(pos)
-		if pos >= 1 and pos <= pool_size and t[pos] then return t[pos][3] or 0 end
+		local p = math.min(pos, observed)
+		if p >= 1 and t[p] then return t[p][3] or 0 end
 		return 0
 	end
 
