@@ -216,6 +216,21 @@ SlashCmdList["HSVER"] = function(msg)
 		end
 		return
 	end
+	if string.sub(msg, 1, 8) == "test msg" then
+		-- Simulate receiving a CHAT_MSG_ADDON from a fake player
+		-- Usage: /hsver test msg [version] [name]
+		local rest = string.sub(msg, 10) -- after "test msg "
+		local fakeVer, fakeName
+		local _, _, v, n = string.find(rest, "^(%S+)%s+(%S+)")
+		if v then fakeVer, fakeName = v, n
+		else fakeVer = rest ~= "" and rest or "9.9.9" end
+		fakeName = fakeName or "TestPlayer"
+		updateNotified = false
+		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100THSE Debug:|r Simulating receive: sender=" .. fakeName .. " version=" .. fakeVer, 0.6, 0.8, 1)
+		SaveAddonUser(fakeName, fakeVer)
+		OnRemoteVersion(fakeVer)
+		return
+	end
 	if msg == "test" then
 		local fakeVersion = "9.9.9"
 		updateNotified = false
@@ -283,6 +298,7 @@ SlashCmdList["HSVER"] = function(msg)
 			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r You are not in a raid/battleground.", 1, 0.82, 0)
 			return
 		end
+		local uptodate = {}
 		local outdated = {}
 		local missing = {}
 		for i = 1, numRaid do
@@ -292,6 +308,8 @@ SlashCmdList["HSVER"] = function(msg)
 				if entry and type(entry) == "table" and entry.ver then
 					if entry.ver ~= MY_VERSION then
 						table.insert(outdated, { name = name, ver = entry.ver })
+					else
+						table.insert(uptodate, name)
 					end
 				else
 					table.insert(missing, name)
@@ -299,21 +317,23 @@ SlashCmdList["HSVER"] = function(msg)
 			end
 		end
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r BG version check (you: v" .. MY_VERSION .. ")", 1, 0.82, 0)
-		if table.getn(outdated) == 0 and table.getn(missing) == 0 then
-			DEFAULT_CHAT_FRAME:AddMessage("  |cff88cc88Everyone in the raid is on the current version.|r", 0.7, 0.7, 0.7)
-		else
-			if table.getn(outdated) > 0 then
-				DEFAULT_CHAT_FRAME:AddMessage("  Outdated versions:", 0.87, 0.73, 0.27)
-				for _, p in ipairs(outdated) do
-					DEFAULT_CHAT_FRAME:AddMessage("    |cffffffff" .. p.name .. "|r — |cffffaa44v" .. p.ver .. "|r", 0.7, 0.7, 0.7)
-				end
+		if table.getn(uptodate) > 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("  |cff88cc88Up to date (" .. table.getn(uptodate) .. "):|r", 0.7, 0.7, 0.7)
+			for _, name in ipairs(uptodate) do
+				DEFAULT_CHAT_FRAME:AddMessage("    |cff88cc88" .. name .. "|r", 0.7, 0.7, 0.7)
 			end
-			if table.getn(missing) > 0 then
-				DEFAULT_CHAT_FRAME:AddMessage("  No addon detected:", 0.87, 0.73, 0.27)
-				for _, name in ipairs(missing) do
-					DEFAULT_CHAT_FRAME:AddMessage("    |cffffffff" .. name .. "|r", 0.7, 0.7, 0.7)
-				end
+		end
+		if table.getn(outdated) > 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("  Outdated versions:", 0.87, 0.73, 0.27)
+			for _, p in ipairs(outdated) do
+				DEFAULT_CHAT_FRAME:AddMessage("    |cffffffff" .. p.name .. "|r — |cffffaa44v" .. p.ver .. "|r", 0.7, 0.7, 0.7)
 			end
+		end
+		if table.getn(missing) > 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("  No addon detected: |cffffffff" .. table.concat(missing, ", ") .. "|r", 0.87, 0.73, 0.27)
+		end
+		if table.getn(uptodate) == 0 and table.getn(outdated) == 0 and table.getn(missing) == 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("  |cff888888No other raid members found.|r", 0.7, 0.7, 0.7)
 		end
 	elseif msg == "users all" or msg == "users reset" or msg == "users req" then
 		if msg == "users req" then
@@ -367,6 +387,7 @@ SlashCmdList["HSVER"] = function(msg)
 	else
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r v" .. MY_VERSION, 1, 0.82, 0)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver test — simulate update available", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver test msg [ver] [name] — simulate full receive from a fake player", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver reset — revert update display", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor 250000 — override your honor value", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver honor reset — clear honor override", 0.7, 0.7, 0.7)
