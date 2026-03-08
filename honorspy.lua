@@ -10,6 +10,7 @@ HonorSpy:RegisterDefaults('realm', {
 		debugMenu = false,
 		commErrors = false,
 		commRawData = false,
+		versionDebug = false,
 	}
 })
 
@@ -121,6 +122,7 @@ function HonorSpy:OnEnable()
 	self.debugMode = debugMenuEnabled
 	HonorSpyCommErrors = self.db.realm.hs.commErrors or false
 	HonorSpyCommRawData = self.db.realm.hs.commRawData or false
+	THSE_VersionDebug = self.db.realm.hs.versionDebug or false
 	updateCommDebug()
 	self.OnMenuRequest = BuildMenu()
 	self:Hook("InspectUnit");
@@ -424,6 +426,9 @@ function HonorSpy:ResetDebugOptions()
 	updateCommDebug()
 	self.db.realm.hs.commErrors = false
 	self.db.realm.hs.commRawData = false
+	-- Version comm debug
+	THSE_VersionDebug = false
+	self.db.realm.hs.versionDebug = false
 	-- Failed chunks storage
 	HonorSpy_FailedChunks = {}
 	-- Debug menu visibility
@@ -702,6 +707,18 @@ function BuildMenu()
 				desc = "Fix NaN fields, remove entries with corrupt timestamps or negative honor, clamp rank/RP to valid ranges.",
 				order = 4,
 				func = function() healNaNData() end,
+			},
+			version_debug = {
+				type = "toggle",
+				name = "Version Comm Debug",
+				desc = "Log all incoming and outgoing THSE version/REQ addon messages to chat.",
+				order = 5,
+				get = function() return THSE_VersionDebug end,
+				set = function(v)
+					THSE_VersionDebug = v
+					HonorSpy.db.realm.hs.versionDebug = v
+					HonorSpy:Print("Version comm debug " .. (v and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
+				end,
 			},
 		},
 	}

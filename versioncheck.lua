@@ -7,10 +7,27 @@ local MY_VERSION = GetAddOnMetadata(ADDON_NAME, "Version") or "0.0.0"
 local MSG_PREFIX = "THSE"
 local updateNotified = false
 
+-- Global debug flag: toggled via the Debug menu or /hsver debug reset
+THSE_VersionDebug = false
+
+local function VerDebug(direction, channel, who, payload)
+	if not THSE_VersionDebug then return end
+	local tag = direction == "OUT" and "|cff44ff44[THSE SEND]|r" or "|cff44ddff[THSE RECV]|r"
+	DEFAULT_CHAT_FRAME:AddMessage(tag .. " " .. channel .. " " .. (who or "?") .. " => " .. tostring(payload))
+end
+
 -- Global table so standings.lua can read who has the addon installed
 -- Entries: THSE_AddonUsers[name] = { ver = "x.y.z", seen = <timestamp> }
 THSE_AddonUsers = {}
 local EXPIRY_SECONDS = 7 * 24 * 60 * 60  -- 7 days
+
+local function IsInBattleground()
+	for i = 1, (MAX_BATTLEFIELD_QUEUES or 3) do
+		local status = GetBattlefieldStatus(i)
+		if status == "active" then return true end
+	end
+	return false
+end
 
 local function LoadAddonUsers()
 	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
@@ -72,11 +89,19 @@ local function BroadcastVersion()
 	local msg = MY_VERSION
 	if IsInGuild() then
 		SendAddonMessage(MSG_PREFIX, msg, "GUILD")
+		VerDebug("OUT", "GUILD", me, msg)
 	end
-	if GetNumRaidMembers() > 0 then
+	if IsInBattleground() then
+		SendAddonMessage(MSG_PREFIX, msg, "BATTLEGROUND")
+		VerDebug("OUT", "BATTLEGROUND", me, msg)
+		SendAddonMessage(MSG_PREFIX, msg, "RAID")  -- also RAID so pre-BATTLEGROUND clients see it
+		VerDebug("OUT", "RAID(compat)", me, msg)
+	elseif GetNumRaidMembers() > 0 then
 		SendAddonMessage(MSG_PREFIX, msg, "RAID")
+		VerDebug("OUT", "RAID", me, msg)
 	elseif GetNumPartyMembers() > 0 then
 		SendAddonMessage(MSG_PREFIX, msg, "PARTY")
+		VerDebug("OUT", "PARTY", me, msg)
 	end
 end
 
@@ -84,6 +109,7 @@ end
 local function ReplyVersion(distribution)
 	local msg = MY_VERSION
 	SendAddonMessage(MSG_PREFIX, msg, distribution)
+	VerDebug("OUT", distribution .. "(reply)", UnitName("player"), msg)
 end
 
 local function OnRemoteVersion(version)
@@ -122,6 +148,7 @@ frame:SetScript("OnEvent", function()
 				-- legacy bare version string from older clients
 				msgType, payload = "VER", arg2
 			end
+			VerDebug("IN", arg3 or "?", arg4, msgType .. ":" .. tostring(payload))
 			if msgType == "VER" then
 				SaveAddonUser(arg4, payload)
 				OnRemoteVersion(payload)
@@ -154,7 +181,10 @@ frame:SetScript("OnUpdate", function()
 			if IsInGuild() then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD")
 			end
-			if GetNumRaidMembers() > 0 then
+			if IsInBattleground() then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "BATTLEGROUND")
+				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
+			elseif GetNumRaidMembers() > 0 then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
 			elseif GetNumPartyMembers() > 0 then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
@@ -171,7 +201,10 @@ frame:SetScript("OnUpdate", function()
 			if IsInGuild() then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD")
 			end
-			if GetNumRaidMembers() > 0 then
+			if IsInBattleground() then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "BATTLEGROUND")
+				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
+			elseif GetNumRaidMembers() > 0 then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
 			elseif GetNumPartyMembers() > 0 then
 				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
@@ -342,7 +375,11 @@ SlashCmdList["HSVER"] = function(msg)
 				SendAddonMessage(MSG_PREFIX, "REQ:1", "GUILD")
 				table.insert(channels, "GUILD")
 			end
-			if GetNumRaidMembers() > 0 then
+			if IsInBattleground() then
+				SendAddonMessage(MSG_PREFIX, "REQ:1", "BATTLEGROUND")
+				SendAddonMessage(MSG_PREFIX, "REQ:1", "RAID")
+				table.insert(channels, "BATTLEGROUND+RAID")
+			elseif GetNumRaidMembers() > 0 then
 				SendAddonMessage(MSG_PREFIX, "REQ:1", "RAID")
 				table.insert(channels, "RAID")
 			elseif GetNumPartyMembers() > 0 then
