@@ -106,7 +106,7 @@ frame:RegisterEvent("RAID_ROSTER_UPDATE")
 
 local broadcastDelay = 0
 local needsBroadcast = false
-local REBROADCAST_INTERVAL = 600  -- re-broadcast every 10 minutes
+local REBROADCAST_INTERVAL = 60  -- re-broadcast every 1 minute
 local timeSinceLastBroadcast = 0
 
 frame:SetScript("OnEvent", function()
@@ -262,7 +262,45 @@ SlashCmdList["HSVER"] = function(msg)
 		end
 		local _, myRaceToken = UnitRace("player")
 		DEFAULT_CHAT_FRAME:AddMessage("  Your race token: |cffffffff" .. tostring(myRaceToken) .. "|r", 0.87, 0.73, 0.27)
-	elseif msg == "users" or msg == "users reset" then
+	elseif msg == "users bg" then
+		local numRaid = GetNumRaidMembers()
+		if numRaid == 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r You are not in a raid/battleground.", 1, 0.82, 0)
+			return
+		end
+		local outdated = {}
+		local missing = {}
+		for i = 1, numRaid do
+			local name = GetRaidRosterInfo(i)
+			if name and name ~= UnitName("player") then
+				local entry = THSE_AddonUsers and THSE_AddonUsers[name]
+				if entry and type(entry) == "table" and entry.ver then
+					if entry.ver ~= MY_VERSION then
+						table.insert(outdated, { name = name, ver = entry.ver })
+					end
+				else
+					table.insert(missing, name)
+				end
+			end
+		end
+		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r BG version check (you: v" .. MY_VERSION .. ")", 1, 0.82, 0)
+		if table.getn(outdated) == 0 and table.getn(missing) == 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("  |cff88cc88Everyone in the raid is on the current version.|r", 0.7, 0.7, 0.7)
+		else
+			if table.getn(outdated) > 0 then
+				DEFAULT_CHAT_FRAME:AddMessage("  Outdated versions:", 0.87, 0.73, 0.27)
+				for _, p in ipairs(outdated) do
+					DEFAULT_CHAT_FRAME:AddMessage("    |cffffffff" .. p.name .. "|r — |cffffaa44v" .. p.ver .. "|r", 0.7, 0.7, 0.7)
+				end
+			end
+			if table.getn(missing) > 0 then
+				DEFAULT_CHAT_FRAME:AddMessage("  No addon detected:", 0.87, 0.73, 0.27)
+				for _, name in ipairs(missing) do
+					DEFAULT_CHAT_FRAME:AddMessage("    |cffffffff" .. name .. "|r", 0.7, 0.7, 0.7)
+				end
+			end
+		end
+	elseif msg == "users all" or msg == "users reset" then
 		if msg == "users reset" then
 			THSE_AddonUsers = {}
 			local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
@@ -302,7 +340,8 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver b14 — show B14 info and recommended target", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug — toggle debug menu in right-click dropdown", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver debug reset — reset all debug options and overrides", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users — list known addon users and versions", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users all — list known addon users and versions", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users bg — show raid members not on the current version", 0.7, 0.7, 0.7)
 	end
 end

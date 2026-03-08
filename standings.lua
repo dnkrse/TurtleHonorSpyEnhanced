@@ -265,6 +265,13 @@ local function CreateRow(vi, parent)
 				GameTooltip:AddLine("so others can catch up. Coordinate on a shared honor", 0.6, 0.6, 0.6)
 				GameTooltip:AddLine("target to help everyone rank faster.", 0.6, 0.6, 0.6)
 
+				if safeTarget > 0 then
+					GameTooltip:AddLine(" ", 1, 1, 1)
+					GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safeTarget), 0.87, 0.73, 0.27, 1, 1, 1)
+					GameTooltip:AddLine("This target may change as more players farm honor.", 0.5, 0.5, 0.5)
+					GameTooltip:AddLine("Check back regularly until the weekly reset.", 0.5, 0.5, 0.5)
+				end
+
 				-- Per-player overshoot warning for the local player
 				local myName = UnitName("player")
 				local myHonor = 0
@@ -274,9 +281,7 @@ local function CreateRow(vi, parent)
 				end
 				if safeTarget > 0 and myHonor > safeTarget then
 					local excess = myHonor - safeTarget
-					GameTooltip:AddLine(" ", 1, 1, 1)
 					GameTooltip:AddDoubleLine("Your honor:",  string.format("%d", myHonor),   0.7, 0.7, 0.7, 1, 0.4, 0.4)
-					GameTooltip:AddDoubleLine("Recommended target:", string.format("%d", safeTarget), 0.7, 0.7, 0.7, 1, 1, 1)
 					GameTooltip:AddDoubleLine("Excess:",      string.format("+%d", excess),    0.7, 0.7, 0.7, 1, 0.5, 0.5)
 				end
 
@@ -912,7 +917,7 @@ function HonorSpyStandings:RenderStandings()
 
 		local isFlagged = THSE_FlaggedHashes and THSE_Hash and THSE_FlaggedHashes[THSE_Hash(name)] or false
 		if isFlagged then
-			local r = "cc4444"
+			local r = "ff4444"
 			honorColor = r
 			class_color = r  -- local copy, safe to overwrite
 			curRankColor = r
@@ -924,16 +929,16 @@ function HonorSpyStandings:RenderStandings()
 			type = "player",
 			index = i,
 			_my_bracket = my_bracket,
-			nameText   = C:Colorize(isFlagged and "cc4444" or "444444", i) .. " " .. C:Colorize(isFlagged and "cc4444" or class_color, displayName),
+			nameText   = C:Colorize(isFlagged and "ff4444" or "444444", i) .. " " .. C:Colorize(isFlagged and "ff4444" or class_color, displayName),
 			statusText = onlineDot,
 			honorText  = C:Colorize(honorColor, string.format("%d", thisWeekHonor)),
-			rpAwText   = C:Colorize(isFlagged and "cc4444" or "ddbb44", string.format("%d", math.floor(award + 0.5))),
+			rpAwText   = C:Colorize(isFlagged and "ff4444" or "ddbb44", string.format("%d", math.floor(award + 0.5))),
 			totRPText  = C:Colorize(class_color, string.format("%d", RP)),
 			gainText   = C:Colorize(weekRPColor, weekRP >= 0 and string.format("+%d", weekRP) or string.format("%d", weekRP)),
 			cRankText  = C:Colorize(curRankColor, string.format("%d%%", curProgress)),
 			nRankText  = C:Colorize(nextRankColor, string.format("%d%%", EstProgress)),
-			diffText   = rankDiff > 0 and C:Colorize(isFlagged and "cc4444" or "ddbb44", "+" .. rankDiff)
-			             or (rankDiff < 0 and C:Colorize(isFlagged and "cc4444" or "ff6666", tostring(rankDiff)) or ""),
+			diffText   = rankDiff > 0 and C:Colorize(isFlagged and "ff4444" or "ddbb44", "+" .. rankDiff)
+			             or (rankDiff < 0 and C:Colorize(isFlagged and "ff4444" or "ff6666", tostring(rankDiff)) or ""),
 			rankIconPath   = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
 			rankIconAlpha  = rank > 0 and 1 or 0,
 			cRankIconPath  = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rank > 0 and rank or 1),
