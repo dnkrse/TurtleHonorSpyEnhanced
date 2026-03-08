@@ -421,7 +421,7 @@ SlashCmdList["HSVER"] = function(msg)
 			end
 		end
 		DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r " .. count .. " known addon user(s).", 1, 0.82, 0)
-	elseif cmd == "whatsnew" then
+	elseif msg == "whatsnew" then
 		if HonorSpyWhatsNewFrame then
 			HonorSpyWhatsNewFrame:Show()
 		end
