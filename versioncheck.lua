@@ -19,6 +19,7 @@ local function LoadAddonUsers()
 	local now = time()
 	for name, entry in pairs(hs.addonUsers) do
 		if type(entry) == "table" and entry.seen and (now - entry.seen) < EXPIRY_SECONDS then
+			if entry.ver == "pre-1.2" then entry.ver = "pre-1.2.2" end
 			THSE_AddonUsers[name] = entry
 		else
 			hs.addonUsers[name] = nil
@@ -35,36 +36,40 @@ local function SaveAddonUser(name, version)
 	end
 end
 
+-- Parses "1.2.3a" into { nums = {1, 2, 3}, letter = "a" }
 local function ParseVersion(str)
-	-- isolate only the leading x.y.z part before any separator
-	local vpart = str
-	local sep = string.find(str, "[^%d%.]")
-	if sep then vpart = string.sub(str, 1, sep - 1) end
-	local parts = {}
-	for num in string.gfind(vpart, "(%d+)") do
-		table.insert(parts, tonumber(num))
+	local nums = {}
+	local letter = nil
+	for num in string.gfind(str, "(%d+)") do
+		table.insert(nums, tonumber(num))
 	end
-	return parts
+	local _, _, l = string.find(str, "(%a)%s*$")
+	if l then letter = string.lower(l) end
+	return { nums = nums, letter = letter }
 end
 
 -- Returns 1 if a > b, -1 if a < b, 0 if equal
 local function CompareVersions(a, b)
 	local pa = ParseVersion(a)
 	local pb = ParseVersion(b)
-	local len = math.max(table.getn(pa), table.getn(pb))
+	local len = math.max(table.getn(pa.nums), table.getn(pb.nums))
 	for i = 1, len do
-		local va = pa[i] or 0
-		local vb = pb[i] or 0
+		local va = pa.nums[i] or 0
+		local vb = pb.nums[i] or 0
 		if va > vb then return 1 end
 		if va < vb then return -1 end
 	end
+	local la = pa.letter or ""
+	local lb = pb.letter or ""
+	if la > lb then return 1 end
+	if la < lb then return -1 end
 	return 0
 end
 
 local function BroadcastVersion()
 	local me = UnitName("player")
 	if me then SaveAddonUser(me, MY_VERSION) end
-	local msg = "VER:" .. MY_VERSION
+	local msg = MY_VERSION
 	if IsInGuild() then
 		SendAddonMessage(MSG_PREFIX, msg, "GUILD")
 	end
@@ -77,7 +82,7 @@ end
 
 -- Reply to a version request with our version (only to the channel it came from)
 local function ReplyVersion(distribution)
-	local msg = "VER:" .. MY_VERSION
+	local msg = MY_VERSION
 	SendAddonMessage(MSG_PREFIX, msg, distribution)
 end
 
@@ -161,6 +166,16 @@ frame:SetScript("OnUpdate", function()
 		if timeSinceLastBroadcast >= REBROADCAST_INTERVAL then
 			timeSinceLastBroadcast = 0
 			BroadcastVersion()
+			-- Also request versions from others who may have come online since last check
+			local reqMsg = "REQ:1"
+			if IsInGuild() then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD")
+			end
+			if GetNumRaidMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
+			elseif GetNumPartyMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
+			end
 		end
 	end
 end)
@@ -300,7 +315,27 @@ SlashCmdList["HSVER"] = function(msg)
 				end
 			end
 		end
-	elseif msg == "users all" or msg == "users reset" then
+	elseif msg == "users all" or msg == "users reset" or msg == "users req" then
+		if msg == "users req" then
+			local channels = {}
+			if IsInGuild() then
+				SendAddonMessage(MSG_PREFIX, "REQ:1", "GUILD")
+				table.insert(channels, "GUILD")
+			end
+			if GetNumRaidMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, "REQ:1", "RAID")
+				table.insert(channels, "RAID")
+			elseif GetNumPartyMembers() > 0 then
+				SendAddonMessage(MSG_PREFIX, "REQ:1", "PARTY")
+				table.insert(channels, "PARTY")
+			end
+			if table.getn(channels) > 0 then
+				DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Version request sent to: " .. table.concat(channels, ", "), 1, 0.82, 0)
+			else
+				DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100TurtleHonorSpyEnhanced:|r Not in guild, party, or raid — nowhere to send REQ.", 1, 0.82, 0)
+			end
+			return
+		end
 		if msg == "users reset" then
 			THSE_AddonUsers = {}
 			local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
@@ -323,7 +358,7 @@ SlashCmdList["HSVER"] = function(msg)
 						seenAgo = string.format(" (%.1fd ago)", diff / 86400)
 					end
 				end
-				local color = ver == "pre-1.2" and "ffaa44" or "55ccff"
+				local color = ver == "pre-1.2.2" and "ffaa44" or "55ccff"
 				DEFAULT_CHAT_FRAME:AddMessage("  |cffffffff" .. name .. "|r — |cff" .. color .. ver .. "|r" .. seenAgo, 0.7, 0.7, 0.7)
 				count = count + 1
 			end
@@ -343,5 +378,6 @@ SlashCmdList["HSVER"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users all — list known addon users and versions", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users bg — show raid members not on the current version", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage("  /hsver users req — manually send a version request to guild/party/raid", 0.7, 0.7, 0.7)
 	end
 end

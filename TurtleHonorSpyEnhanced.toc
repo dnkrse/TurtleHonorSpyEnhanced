@@ -4,7 +4,7 @@
 ## Author: Citrin (Tel'Abim)
 ## X-Credits: Original by kakysha. Contributors: Mistaboom, Moxie, syli
 ## OptionalDeps: Ace2
-## Version: 1.2.3
+## Version: 1.2.3a
 ## X-Category: Battlegrounds/PvP
 ## SavedVariables: HonorSpyDB
 

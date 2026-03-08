@@ -336,8 +336,8 @@ local function CreateRow(vi, parent)
 			GameTooltip:AddDoubleLine("Status:", "|cff88cc88Online|r", 0.7, 0.7, 0.7, 0.5, 0.8, 0.5)
 		end
 		if td._addonVer then
-			if td._addonVer == "pre-1.2" then
-				GameTooltip:AddDoubleLine("Addon:", "pre-1.2", 0.7, 0.7, 0.7, 0.8, 0.6, 0.2)
+			if td._addonVer == "pre-1.2.2" then
+				GameTooltip:AddDoubleLine("Addon:", "pre-1.2.2", 0.7, 0.7, 0.7, 0.8, 0.6, 0.2)
 			else
 				GameTooltip:AddDoubleLine("Addon:", "v" .. td._addonVer, 0.7, 0.7, 0.7, 0.8, 0.47, 1)
 			end

@@ -61,13 +61,8 @@ Options can be accessed by right-clicking the minimap icon.
 
 Only stores players with at least 1 HK.
 
-## Commands
-
-`/hs show` — show/hide standings table
-`/hs estimate` — open the Honor Estimator panel
-
 ## Credits
 
 Enhanced version created by **Citrin** (Turtle WoW — Tel'Abim)
 
-Based on HonorSpy by **kakysha**, with Turtle WoW adaptations by **Mistaboom**, **Moxie**, and **syli**.
+Based on HonorSpy by **kakysha**. **Mistaboom**, **Moxie**, **syli**.

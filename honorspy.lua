@@ -846,20 +846,20 @@ function store_player(playerName, player, sender)
 end
 
 -- Track that a comm sender is using some HonorSpy addon.
--- If they haven't sent a VER broadcast, they're running something before v1.2
+-- If they haven't sent a VER broadcast, they're running something before v1.2.2
 -- (which introduced the version check). A real VER broadcast overwrites this.
 local function tagSenderAddon(sender)
 	if type(sender) ~= "string" or sender == UnitName("player") then return end
 	if not THSE_AddonUsers then return end
 	local existing = THSE_AddonUsers[sender]
 	-- If already identified via version broadcast (real version), just refresh timestamp
-	if existing and existing.ver ~= "pre-1.2" then
+	if existing and existing.ver ~= "pre-1.2.2" then
 		existing.seen = time()
 		return
 	end
-	-- No VER broadcast received → pre-1.2
+	-- No VER broadcast received → pre-1.2.2
 	if not existing then
-		THSE_AddonUsers[sender] = { ver = "pre-1.2", seen = time() }
+		THSE_AddonUsers[sender] = { ver = "pre-1.2.2", seen = time() }
 		local hs = HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
 		if hs then
 			if not hs.addonUsers then hs.addonUsers = {} end
