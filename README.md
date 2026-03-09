@@ -12,13 +12,13 @@ Please reach out if you would like to see further enhancements. See you in the B
 
 
 ### Overlay Widget
-<img src="images/overlay.png">
+<img src="images/overlay.jpg">
 
 ### Standings Table
 <img src="images/table.png">
 
 ### Honor Estimator
-<img src="images/estimator.png">
+<img src="images/estimator.jpg">
 
 ## What's Changed
 
