@@ -1,39 +1,21 @@
 # TurtleHonorSpyEnhanced
 
-Enhanced PvP standings tracker for **Turtle WoW**. This is a fork of HonorSpy with major modifications to improve accuracy and convenience.
+A PvP rank overlay addon for **Turtle WoW** — fork of HonorSpy.
 
-The goal of this addon is to make the PvP honor system transparent and understandable for everyone. By showing how brackets, RP, and standings work, players can coordinate within their faction to rank as effectively as possible. Optimized bracket stacking benefits everyone — please support this effort!
+> **v1.4 — Rework in progress**
+> Patch 1.18.1 replaces the bracket-based honor system entirely with a new PvP implementation. This version is a transitional release that removes all features tied to the old system. A full rework is underway.
 
-> **Note:** This addon is only accurate on Turtle WoW. It will not sync with users of other HonorSpy versions.
+<img src="images/race_human_female.jpg" width="15" height="15">&ensp;<img src="images/class_priest.jpg" width="15" height="15">&ensp;**Citrin** (Tel'Abim - TurtleWoW)
 
-Please reach out if you would like to see further enhancements. See you in the Battlegrounds!
+## What's in v2.0
 
- <img src="images/race_human_female.jpg" width="15" height="15">&ensp;<img src="images/class_priest.jpg" width="15" height="15">&ensp;**Citrin** (Tel'Abim - TurtleWoW)
+- **Rank overlay** — draggable widget showing your current PvP rank icon and rank number
+- **Version checker** — notifies you in chat when a newer version is available
+- **Minimap button** — left-click toggles the overlay
 
-
-### Overlay Widget
-<img src="images/overlay.jpg">
-
-### Standings Table
-<img src="images/table.png">
-
-### Honor Estimator
-<img src="images/estimator.jpg">
-
-## What's Changed
-
-- **Accurate RP calculations** — RP award/decay rewritten to match TurtleWoW server formulas, no de-ranking below your current rank's minimum RP, faction-only filtering by race
-- **Enhanced standings table** — bracket separators with RP ranges, honor/RP/standing/rank/next week estimate columns
-- **Friend online tracking** — green/red/grey dots show online, in BG, or offline friends
-- **Compact overlay widget** — draggable panel with rank, progress bar, honor/standing, and next week estimate
-- **Honor Estimator** — slider to project rank/RP for any honor value. Warns about overshoot beyond the RP cap and reminds top bracket players to stay close for collective gains
-- **Bracket Optimization** — overlay banner when your honor exceeds the safe B14 target, with tooltip showing Your Honor / Safe Target / Excess
-- **Version checker** — notifies you in chat if a newer version is seen from another player
-- **Minimap button** — left-click toggles overlay, Shift+click opens standings table, right-click opens menu
+Everything tied to the old bracket/RP/standings system has been removed and will be rebuilt for the new Patch 1.18.1 PvP system.
 
 ## Install
-
-> **Important:** Disable or remove any previous version of HonorSpy (including HonorSpyTurtle) before using this addon. Running both at the same time can cause conflicts.
 
 **Recommended: via the Turtle WoW Launcher**
 1. Open the Turtle WoW Launcher and go to **AddOns**
@@ -43,26 +25,18 @@ Please reach out if you would like to see further enhancements. See you in the B
 **Manual install**
 1. Download the latest release (or clone this repo)
 2. Place the `TurtleHonorSpyEnhanced` folder in your `Interface/AddOns/` directory
-3. Remove any old version of HonorSpy or HonorSpyTurtle as they can cause interference.
 
-## How It Works
+> Remove any old version of HonorSpy or HonorSpyTurtle first — running both causes conflicts.
 
-The addon runs in the background:
+## Commands
 
-1. Inspects every player in range that you target or mouseover
-2. Syncs your database with party/raid/BG members and guildmates
-3. Estimates onward RP, Rank, and Progress using server-accurate formulas
-4. Supports automatic weekly PvP reset (configurable reset day)
-5. Hover over a player row to see how recently their data was updated
-6. Row limit to reduce lag on table open (default: 750)
-7. Export to CSV for use with external spreadsheets
-
-Options can be accessed by right-clicking the minimap icon.
-
-Only stores players with at least 1 HK.
+| Command | Action |
+|---|---|
+| `/hs` | Toggle overlay |
+| `/hsver` | Show version info |
+| `/hsver users all` | List players running the addon |
+| `/hsver users bg` | Check raid/BG members for version mismatches |
 
 ## Credits
 
-Enhanced version created by **Citrin** (Turtle WoW — Tel'Abim)
-
-Based on HonorSpy by **kakysha**. **Mistaboom**, **Moxie**, **syli**.
+Enhanced version by **Citrin** (Turtle WoW — Tel'Abim). Original addon by kakysha.
