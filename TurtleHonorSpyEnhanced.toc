@@ -1,9 +1,9 @@
 ## Interface: 11200
 ## Title: TurtleHonorSpyEnhanced
-## Notes: Enhanced PvP standings tracker for Turtle WoW (fork of HonorSpy)
+## Notes: PvP rank and honor tracker for Turtle WoW
 ## Author: Citrin (Tel'Abim)
 ## OptionalDeps: Ace2
-## Version: 1.4
+## Version: 2.0
 ## X-Category: Battlegrounds/PvP
 ## SavedVariables: HonorSpyDB
 
@@ -12,3 +12,4 @@ Libs\embeds.xml
 honorspy.lua
 overlay.lua
 versioncheck.lua
+debug_pvp.lua

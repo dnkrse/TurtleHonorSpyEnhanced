@@ -1,12 +1,15 @@
-HonorSpy = AceLibrary("AceAddon-2.0"):new("AceConsole-2.0", "AceDB-2.0", "AceEvent-2.0", "AceModuleCore-2.0")
+HonorSpy = AceLibrary("AceAddon-2.0"):new("AceDB-2.0", "AceEvent-2.0", "AceModuleCore-2.0")
 
 HonorSpy:RegisterDB("HonorSpyDB")
 HonorSpy:RegisterDefaults('realm', {
 	hs = {
-		overlayPos    = nil,
-		overlayHidden = false,
-		minimapAngle  = 200,
-		addonUsers    = {},
+		overlayPos          = nil,
+		overlayHidden       = false,
+		minimapAngle        = 200,
+		addonUsers          = {},
+		weeklyStartProgress = nil,
+		weeklyResetStamp    = 0,
+		sessionStartHonor   = 0,
 	}
 })
 
@@ -14,26 +17,26 @@ function HonorSpy:OnEnable()
 	self:RegisterEvent("PLAYER_ENTERING_WORLD")
 end
 
--- /hs or /honorspy to toggle overlay
-local options = {
-	type = "group",
-	args = {
-		show = {
-			type = "execute",
-			name = "Show Overlay",
-			desc = "Toggle the HonorSpy overlay",
-			func = function()
-				if HonorSpyOverlay_Toggle then HonorSpyOverlay_Toggle() end
-			end,
-		},
-	},
-}
-HonorSpy:RegisterChatCommand({ "/honorspy", "/hs" }, options)
+-- /hs or /honorspy to toggle overlay, /hs about for info
+SLASH_HONORSPY1 = "/hs"
+SLASH_HONORSPY2 = "/honorspy"
+SlashCmdList["HONORSPY"] = function(msg)
+	local cmd = string.lower(msg or "")
+	if cmd == "version" or cmd == "ver" then
+		local ver = GetAddOnMetadata("TurtleHonorSpyEnhanced", "Version") or "?"
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cffFFD100TurtleHonorSpyEnhanced|r v" .. ver .. " — by Citrin (Tel'Abim)", 1, 0.82, 0)
+	elseif cmd == "show" then
+		if HonorSpyOverlay_Toggle then HonorSpyOverlay_Toggle() end
+	else
+		if HonorSpyOverlay_Toggle then HonorSpyOverlay_Toggle() end
+	end
+end
 
 -- Called from /hsver debug
 function HonorSpy:ToggleDebugMenu()
 	DEFAULT_CHAT_FRAME:AddMessage(
-		"|cffFFD100TurtleHonorSpyEnhanced v1.4:|r No debug menu — rework in progress.",
+		"|cffFFD100TurtleHonorSpyEnhanced:|r No debug menu available.",
 		1, 0.82, 0)
 end
 

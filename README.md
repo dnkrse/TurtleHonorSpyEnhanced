@@ -2,10 +2,18 @@
 
 A PvP rank overlay addon for **Turtle WoW**
 
-> **v1.4 — Rework in progress**
-> Patch 1.18.1 replaces the bracket-based honor system entirely with a new PvP implementation. This version is a transitional release that removes all features tied to the old system. A full rework is underway.
+> **v2.0 — Patch 1.18.1 Rework**
+> Rebuilt for the new PvP system introduced in Patch 1.18.1. The old bracket-based honor system has been replaced entirely — this version adapts to the new mechanics with more features to come.
 
 <img src="images/race_human_female.jpg" width="15" height="15">&ensp;<img src="images/class_priest.jpg" width="15" height="15">&ensp;**Citrin** (Tel'Abim - TurtleWoW)
+
+![Overlay](images/overlay.png)
+
+## Features
+
+- Track your rank progression
+- Monitor weekly honor toward the 20,000 cap
+- More Features to come soon
 
 ## Install
 
@@ -23,3 +31,5 @@ A PvP rank overlay addon for **Turtle WoW**
 | Command | Action |
 |---|---|
 | `/hs` | Toggle overlay |
+| `/hs show` | Toggle overlay |
+| `/hs version` | Show addon version and author |

@@ -376,5 +376,11 @@ SlashCmdList["HSVER"] = function(msg)
 			"  /hsver users bg — show raid members not on current version", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  /hsver users req — send version request to guild/party/raid", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver pvp [rank|week|last|life|sess] — dump PvP API values", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver watch — watch rank progress / honor live (1s poll)", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver watch stop — stop the watcher", 0.7, 0.7, 0.7)
 	end
 end
