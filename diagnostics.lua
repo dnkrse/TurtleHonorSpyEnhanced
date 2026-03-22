@@ -1,9 +1,7 @@
 -- TurtleHonorSpyEnhanced: in-game diagnostics
--- /hsdiag — dumps DB state and addon status to chat.
+-- Called via /hsver diag
 
-SLASH_HSDIAG1 = "/hsdiag"
-SlashCmdList["HSDIAG"] = function(msg)
-	local cmd = string.lower(msg or "")
+function HonorSpy_RunDiagnostics()
 	local out = DEFAULT_CHAT_FRAME
 
 	local function p(text, r, g, b)
@@ -98,7 +96,7 @@ SlashCmdList["HSDIAG"] = function(msg)
 	p("|cffFFD100=== End Diagnostics ===|r")
 end
 
--- ===== PvP Debug Toggle (refactored from debug_pvp.lua) =====
+-- ===== PvP Debug Toggle — called via /hsver pvpdebug =====
 local _debugPvpEnabled = false
 
 local _debugFrame = CreateFrame("Frame", "HonorSpyDebugPvpFrame")

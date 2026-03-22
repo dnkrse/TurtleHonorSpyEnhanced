@@ -22,11 +22,6 @@ SlashCmdList["HONORSPY"] = function(msg)
 	elseif cmd == "minimap" then
 		if HonorSpyMinimap_Toggle then HonorSpyMinimap_Toggle() end
 
-	elseif cmd == "debug" then
-		if HonorSpy_ToggleDebugPvp then
-			HonorSpy_ToggleDebugPvp()
-		end
-
 	elseif cmd == "help" or cmd == "?" then
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cffFFD100TurtleHonorSpyEnhanced|r commands:", 1, 0.82, 0)
@@ -39,7 +34,9 @@ SlashCmdList["HONORSPY"] = function(msg)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  |cffffff00/hs version|r  — Show addon version", 1, 1, 1)
 		DEFAULT_CHAT_FRAME:AddMessage(
-			"  |cffffff00/hs debug|r    — Toggle PvP debug output", 1, 1, 1)
+			"  |cffffff00/hsver diag|r  — Dump DB/addon state", 1, 1, 1)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  |cffffff00/hsver pvpdebug|r  — Toggle PvP event debug", 1, 1, 1)
 	else
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cffFFD100TurtleHonorSpyEnhanced:|r Unknown command '" .. cmd ..

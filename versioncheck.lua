@@ -329,6 +329,16 @@ SlashCmdList["HSVER"] = function(msg)
 			"|cffFFD100TurtleHonorSpyEnhanced:|r Addon users list cleared.",
 			1, 0.82, 0)
 
+	elseif msg == "diag" then
+		if HonorSpy_RunDiagnostics then
+			HonorSpy_RunDiagnostics()
+		end
+
+	elseif msg == "pvpdebug" then
+		if HonorSpy_ToggleDebugPvp then
+			HonorSpy_ToggleDebugPvp()
+		end
+
 	elseif msg == "users all" or msg == "users" then
 		local count = 0
 		if THSE_AddonUsers then
@@ -368,6 +378,10 @@ SlashCmdList["HSVER"] = function(msg)
 			"  /hsver reset — revert update display", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  /hsver debug — toggle version comm debug logging", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver pvpdebug — toggle PvP event debug output", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver diag — dump DB state and addon status", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  /hsver users all — list known addon users and versions", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(
