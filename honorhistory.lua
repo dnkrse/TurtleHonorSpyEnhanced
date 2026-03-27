@@ -41,6 +41,27 @@ local _BG_MARK_ICON = {
 	["Blood Ring"]    = "Interface\\Icons\\INV_Jewelry_Talisman_05",
 }
 
+-- Daily BG rotation (5-day cycle).  Anchor: 2026-03-22 = index 0 (WSG).
+local _DAILY_BG_CYCLE = {
+	[0] = "Warsong Gulch",
+	[1] = "Arathi Basin",
+	[2] = "Blood Ring",
+	[3] = "Sunnyglade Valley",
+	[4] = "Alterac Valley",
+}
+local _DAILY_BG_ANCHOR = time({ year=2026, month=3, day=22, hour=0 })  -- known WSG day
+
+local function GetDailyBG(timestamp)
+	local d = date("*t", timestamp)
+	local dayT = time({ year=d.year, month=d.month, day=d.day, hour=0 })
+	local anchorD = date("*t", _DAILY_BG_ANCHOR)
+	local anchorT = time({ year=anchorD.year, month=anchorD.month, day=anchorD.day, hour=0 })
+	local diff = math.floor((dayT - anchorT) / 86400 + 0.5)
+	local idx = math.mod(diff, 5)
+	if idx < 0 then idx = idx + 5 end
+	return _DAILY_BG_CYCLE[idx]
+end
+
 -- Quests that turn in marks from all three main BGs simultaneously
 local _CONCERTED_QUEST = {
 	["concerted efforts"] = true,  -- Alliance
@@ -494,6 +515,10 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 			or FmtTime(dayFirstT)
 		if span > 60 then tstr = tstr .. "  (" .. math.floor(span/60) .. "m)" end
 		table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
+		local dailyBG = GetDailyBG(dayFirstT)
+		if dailyBG then
+			table.insert(L, { "Daily BG", dailyBG, 0.55, 0.55, 0.55, 1.0, 0.82, 0.0 })
+		end
 	end
 	table.insert(L, { "", nil })
 
@@ -752,6 +777,11 @@ local function AcquireDateSep()
 		btn._fs:SetPoint("TOPLEFT",  btn, "TOPLEFT",  8, -4)
 		btn._fs:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -266, -4)
 		btn._fs:SetTextColor(1, 1, 1)
+		-- Daily BG icon (between date label and W/L)
+		btn._dailyIcon = btn:CreateTexture(nil, "ARTWORK")
+		btn._dailyIcon:SetWidth(12); btn._dailyIcon:SetHeight(12)
+		btn._dailyIcon:SetPoint("RIGHT", btn, "RIGHT", -270, 0)
+		btn._dailyIcon:Hide()
 		-- W/L fraction (fixed position)
 		btn._hdrWL = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrWL:SetFont(FONT, 10)
@@ -1635,6 +1665,15 @@ local function RefreshList()
 			local lblBright = math.max(0.38, barBright + 0.12)
 			sep._fs:SetTextColor(lblBright, lblBright, lblBright)
 			sep._fs:SetText(FmtDateLabel(dayStr))
+			-- Daily BG icon
+			local dailyBG = GetDailyBG(g.startT)
+			local dailyTex = dailyBG and _BG_MARK_ICON[dailyBG]
+			if dailyTex then
+				sep._dailyIcon:SetTexture(dailyTex)
+				sep._dailyIcon:Show()
+			else
+				sep._dailyIcon:Hide()
+			end
 			if dayOpen then sep._line:Show() else sep._line:Hide() end
 			sep:SetScript("OnClick", function()
 				_dayCollapsed[capturedDay] = not _dayCollapsed[capturedDay]
@@ -2393,6 +2432,7 @@ local function BuildExportText()
 		local dgs = dayMap[ds]
 		local dayHonor = 0
 		local dayKills, dayTurnins, dayAwards = 0, 0, 0
+		local dayHK, dayHA, dayHQ = 0, 0, 0
 		local dayBGs, dayWins, dayLosses = 0, 0, 0
 		local dayFirstRankPct, dayLastRankPct = nil, nil
 		local dayFirstRankNum, dayLastRankNum = nil, nil
@@ -2406,9 +2446,9 @@ local function BuildExportText()
 				if g.result == "loss" then dayLosses = dayLosses + 1 end
 			end
 			for _, e in ipairs(g.entries) do
-				if e.type == "kill"   then dayKills   = dayKills   + 1 end
-				if e.type == "turnin" then dayTurnins = dayTurnins + 1 end
-				if e.type == "award"  then dayAwards  = dayAwards  + 1 end
+				if e.type == "kill"   then dayKills   = dayKills   + 1; dayHK = dayHK + (e.amount or 0) end
+				if e.type == "turnin" then dayTurnins = dayTurnins + 1; dayHQ = dayHQ + (e.amount or 0) end
+				if e.type == "award"  then dayAwards  = dayAwards  + 1; dayHA = dayHA + (e.amount or 0) end
 				if e.rankPct ~= nil then
 					if not dayLastRankPct then
 						dayLastRankPct = e.rankPct
@@ -2422,6 +2462,7 @@ local function BuildExportText()
 
 		-- Day header line
 		local dayLine = "[" .. ds .. "] honor=" .. math.floor(dayHonor)
+		dayLine = dayLine .. " hk=" .. math.floor(dayHK) .. " ha=" .. math.floor(dayHA) .. " hq=" .. math.floor(dayHQ)
 		dayLine = dayLine .. " k=" .. dayKills .. " q=" .. dayTurnins .. " a=" .. dayAwards
 		if dayBGs > 0 then
 			dayLine = dayLine .. " bg=" .. dayBGs .. " w=" .. dayWins .. " l=" .. dayLosses
@@ -2435,6 +2476,14 @@ local function BuildExportText()
 				dayLine = dayLine .. " rpGain=" .. string.format("%.4f", gain)
 			end
 		end
+		-- Daily BG
+		local firstT = dgs[1] and dgs[1].startT
+		if firstT then
+			local dailyBG = GetDailyBG(firstT)
+			if dailyBG then
+				dayLine = dayLine .. " daily=" .. (_ZONE_ABBR[dailyBG] or dailyBG)
+			end
+		end
 		table.insert(lines, dayLine)
 
 		-- Per-group lines (indented)
@@ -2444,11 +2493,12 @@ local function BuildExportText()
 
 			-- Count entry types within group
 			local gk, gt, ga = 0, 0, 0
+			local ghk, gha, ghq = 0, 0, 0
 			local gFirstRP, gLastRP = nil, nil
 			for _, e in ipairs(g.entries) do
-				if e.type == "kill"   then gk = gk + 1 end
-				if e.type == "turnin" then gt = gt + 1 end
-				if e.type == "award"  then ga = ga + 1 end
+				if e.type == "kill"   then gk = gk + 1; ghk = ghk + (e.amount or 0) end
+				if e.type == "turnin" then gt = gt + 1; ghq = ghq + (e.amount or 0) end
+				if e.type == "award"  then ga = ga + 1; gha = gha + (e.amount or 0) end
 				if e.rankPct ~= nil then
 					if not gLastRP then gLastRP = e.rankPct end
 					gFirstRP = e.rankPct
@@ -2460,7 +2510,11 @@ local function BuildExportText()
 				gLine = gLine .. "-" .. date("%H:%M", g.lastT)
 			end
 			gLine = gLine .. " " .. cat .. " " .. (g.zone or "?")
-			gLine = gLine .. " h=" .. math.floor(g.total) .. " n=" .. nE
+			gLine = gLine .. " h=" .. math.floor(g.total)
+			if ghk > 0 then gLine = gLine .. " hk=" .. math.floor(ghk) end
+			if gha > 0 then gLine = gLine .. " ha=" .. math.floor(gha) end
+			if ghq > 0 then gLine = gLine .. " hq=" .. math.floor(ghq) end
+			gLine = gLine .. " n=" .. nE
 			if gk > 0 then gLine = gLine .. " k=" .. gk end
 			if gt > 0 then gLine = gLine .. " q=" .. gt end
 			if ga > 0 then gLine = gLine .. " a=" .. ga end
