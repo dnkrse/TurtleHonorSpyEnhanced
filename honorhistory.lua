@@ -1712,10 +1712,10 @@ local function CreateHistoryWindow()
 		fs:SetText(text)
 		return fs
 	end
-	MakeColLabel("W/L",    -260, 48)
-	MakeColLabel("Win%",   -214, 40)
+	MakeColLabel("Wins",    -260, 48)
+	MakeColLabel("Win %",   -214, 40)
 	MakeColLabel("Rank",   -164, 60)
-	MakeColLabel("+Rank%", -86,  54)
+	MakeColLabel("Gain %", -86,  54)
 	MakeColLabel("Honor",  -18,  56)
 
 -- Scroll frame (plain; thin custom scrollbar drawn by MakeThinScrollbar)
