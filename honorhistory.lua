@@ -46,7 +46,7 @@ local _DAILY_BG_CYCLE = {
 	[0] = "Warsong Gulch",
 	[1] = "Arathi Basin",
 	[2] = "Blood Ring",
-	[3] = "Sunnyglade Valley",
+	[3] = nil,  -- empty slot (was Sunnyglade Valley; will become Thorn Gorge)
 	[4] = "Alterac Valley",
 }
 local _DAILY_BG_ANCHOR = time({ year=2026, month=3, day=22, hour=0 })  -- known WSG day
