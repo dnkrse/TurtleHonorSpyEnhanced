@@ -1025,7 +1025,9 @@ local function CompactEntries(entries, hideZero)
 			local b = buckets[bt]
 			if b then
 				if b.count == 1 then
-					table.insert(out, b.subs[1])
+					local se = b.subs[1]
+					se._merged = true
+					table.insert(out, se)
 				else
 					table.insert(out, {
 						type = "_compact", subtype = bt, amount = b.total,
@@ -1243,24 +1245,28 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				end
 				amtText = "+" .. FmtHonor(e.amount)
 			elseif e.type == "kill" then
-				nameText = (e.victim or "Unknown") .. " |cff505050" .. FmtTime(e.t) .. "|r"
+				local ts = e._merged and "" or (" |cff505050" .. FmtTime(e.t) .. "|r")
+				nameText = (e.victim or "Unknown") .. ts
 				nr, ng, nb = 0.75, 0.75, 0.75; ar, ag, ab = 0.75, 0.75, 0.75
 				amtText = "+" .. FmtHonor(e.amount)
 			elseif e.type == "turnin" then
+				local ts = e._merged and "" or (" |cff505050" .. FmtTime(e.t) .. "|r")
 				if isConcerted then
-					nameText = e.questName .. " |cff505050" .. FmtTime(e.t) .. "|r"
+					nameText = e.questName .. ts
 				else
 					local bgZone = QuestToBG(e.questName) or e.zone or "Mark"
-					nameText = bgZone .. " Mark of Honor |cff505050" .. FmtTime(e.t) .. "|r"
+					nameText = bgZone .. " Mark of Honor" .. ts
 				end
 				nr, ng, nb = 0.55, 0.80, 1.0; ar, ag, ab = 0.55, 0.80, 1.0
 				amtText = "+" .. FmtHonor(e.amount)
 			elseif e.type == "award" then
-				nameText = (e.zone or "BG Award") .. " |cff505050" .. FmtTime(e.t) .. "|r"
+				local ts = e._merged and "" or (" |cff505050" .. FmtTime(e.t) .. "|r")
+				nameText = (e.zone or "BG Award") .. ts
 				nr, ng, nb = 0.867, 0.733, 0.267; ar, ag, ab = 0.867, 0.733, 0.267
 				amtText = "+" .. FmtHonor(e.amount)
 			else
-				nameText = (e.raw or e.zone or "?") .. " |cff505050" .. FmtTime(e.t) .. "|r"
+				local ts = e._merged and "" or (" |cff505050" .. FmtTime(e.t) .. "|r")
+				nameText = (e.raw or e.zone or "?") .. ts
 				nr, ng, nb = 0.5, 0.5, 0.5; ar, ag, ab = 0.5, 0.5, 0.5
 				amtText = "+" .. FmtHonor(e.amount)
 			end
