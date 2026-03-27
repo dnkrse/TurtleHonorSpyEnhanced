@@ -6,7 +6,7 @@ local INNER_W = 194
 -- ===== Frame =====
 local Frame = CreateFrame("Frame", "HonorSpyOverlayFrame", UIParent)
 Frame:SetWidth(210)
-Frame:SetHeight(92)
+Frame:SetHeight(120)
 Frame:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
 Frame:SetFrameStrata("HIGH")
 Frame:SetFrameLevel(10)
@@ -14,12 +14,12 @@ Frame:SetMovable(true)
 Frame:EnableMouse(true)
 Frame:SetClampedToScreen(true)
 Frame:SetBackdrop({
-	bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+	bgFile   = "Interface\\Buttons\\WHITE8X8",
 	edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
 	tile = true, tileSize = 16, edgeSize = 16,
 	insets = { left = 4, right = 4, top = 4, bottom = 4 },
 })
-Frame:SetBackdropColor(0, 0, 0, 0.85)
+Frame:SetBackdropColor(0, 0, 0, 0.8)
 Frame:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
 Frame:RegisterForDrag("LeftButton")
 Frame:SetScript("OnDragStart", function() this:StartMoving() end)
@@ -64,30 +64,10 @@ btnEstimator:SetScript("OnEnter", function()
 end)
 btnEstimator:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-local btnTable = CreateFrame("Button", nil, Frame)
-btnTable:SetWidth(13)
-btnTable:SetHeight(13)
-btnTable:SetPoint("RIGHT", btnEstimator, "LEFT", -3, 0)
-local btnTableTex = btnTable:CreateTexture(nil, "ARTWORK")
-btnTableTex:SetAllPoints(btnTable)
-btnTableTex:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
-btnTableTex:SetVertexColor(0.7, 0.7, 0.7)
-btnTable:SetScript("OnClick", function()
-	if HonorHistory_Open then HonorHistory_Open() end
-end)
-btnTable:SetScript("OnEnter", function()
-	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMRIGHT")
-	GameTooltip:ClearLines()
-	GameTooltip:AddLine("Honor History", 1, 0.82, 0)
-	GameTooltip:AddLine("Click to open", 0.7, 0.7, 0.7)
-	GameTooltip:Show()
-end)
-btnTable:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
 local btnPool = CreateFrame("Button", nil, Frame)
 btnPool:SetWidth(16)
 btnPool:SetHeight(13)
-btnPool:SetPoint("RIGHT", btnTable, "LEFT", -3, 0)
+btnPool:SetPoint("RIGHT", btnEstimator, "LEFT", -3, 0)
 local btnPoolFS = btnPool:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 btnPoolFS:SetAllPoints()
 btnPoolFS:SetJustifyH("CENTER")
@@ -147,13 +127,6 @@ rankBarBg:SetWidth(INNER_W)
 rankBarBg:SetHeight(18)
 rankBarBg:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -56)
 
-local barLabel = Frame:CreateFontString(nil, "OVERLAY")
-barLabel:SetFont("Fonts\\FRIZQT__.TTF", 8)
-barLabel:SetPoint("TOPLEFT", rankBarBg, "BOTTOMLEFT", 0, -2)
-barLabel:SetJustifyH("LEFT")
-barLabel:SetTextColor(0.4, 0.4, 0.4)
-barLabel:SetText("Rank Progress")
-
 local rankBarBlue = CreateFrame("StatusBar", nil, Frame)
 rankBarBlue:SetWidth(INNER_W)
 rankBarBlue:SetHeight(18)
@@ -184,12 +157,6 @@ rankBarText:SetPoint("CENTER", rankBarTextFrame, "CENTER", 0, 0)
 rankBarText:SetJustifyH("CENTER")
 rankBarText:SetTextColor(1, 1, 1)
 
-local rankBarGainText = Frame:CreateFontString(nil, "OVERLAY")
-rankBarGainText:SetFont("Fonts\\FRIZQT__.TTF", 8)
-rankBarGainText:SetPoint("TOPRIGHT", rankBarBg, "BOTTOMRIGHT", 0, -2)
-rankBarGainText:SetJustifyH("RIGHT")
-rankBarGainText:SetTextColor(0.27, 0.87, 0.47)
-
 -- Invisible tooltip trigger over the progress bar area
 local rankTip = CreateFrame("Frame", nil, Frame)
 rankTip:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD,  -56)
@@ -201,25 +168,128 @@ rankTip:SetScript("OnEnter", function()
 	GameTooltip:AddLine("Rank Progress", 1, 0.82, 0)
 	GameTooltip:AddLine(" ", 1,1,1)
 	local base = rankTip._base
-	local gain = rankTip._wkGain or "+0.00"
+	local gain = rankTip._sGain or "+0.00"
 	local cur  = (rankTip._pct or "?") .. "%"
 	if base then
-		GameTooltip:AddDoubleLine("Week start", base .. "%",  0.6,0.6,0.6,  0.6,0.6,0.6)
-		GameTooltip:AddDoubleLine("+ This week", gain .. "%",  0.45,0.85,0.35,  0.45,0.85,0.35)
-		GameTooltip:AddDoubleLine("= Current", cur,  1,0.82,0,  1,0.82,0)
-	else
-		GameTooltip:AddDoubleLine("+ This week", gain .. "%",  0.45,0.85,0.35,  0.45,0.85,0.35)
+		GameTooltip:AddDoubleLine("Day start",  base .. "%",  0.6,0.6,0.6,  0.6,0.6,0.6)
+			GameTooltip:AddDoubleLine("+ Today", gain .. "%",  0.45,0.85,0.35,  0.45,0.85,0.35)
+			GameTooltip:AddDoubleLine("= Current", cur,  1,0.82,0,  1,0.82,0)
+		else
+			GameTooltip:AddDoubleLine("+ Today", gain .. "%",  0.45,0.85,0.35,  0.45,0.85,0.35)
 		GameTooltip:AddDoubleLine("= Current", cur,  1,0.82,0,  1,0.82,0)
 	end
 	GameTooltip:AddLine(" ", 1,1,1)
-	GameTooltip:AddLine("Your progress toward the next rank.", 0.5, 0.5, 0.5)
+		GameTooltip:AddLine("Your rank progress gained today.", 0.5, 0.5, 0.5)
 	GameTooltip:AddLine("Earning honor increases your rank %.", 0.5, 0.5, 0.5)
 	GameTooltip:AddLine("At 100% you advance to the next rank.", 0.5, 0.5, 0.5)
 	GameTooltip:Show()
 end)
 rankTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- Weekly honor: "Honor" label top right, number+(%)+ icon below
+local footRankLeft = Frame:CreateFontString(nil, "OVERLAY")
+footRankLeft:SetFont("Fonts\\FRIZQT__.TTF", 9)
+footRankLeft:SetJustifyH("LEFT")
+footRankLeft:SetTextColor(0.5, 0.5, 0.5)
+footRankLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -78)
+footRankLeft:SetText("Rank Progress")
+
+local footRankRight = Frame:CreateFontString(nil, "OVERLAY")
+footRankRight:SetFont("Fonts\\FRIZQT__.TTF", 9)
+footRankRight:SetJustifyH("RIGHT")
+footRankRight:SetTextColor(0.27, 0.87, 0.47)
+footRankRight:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -78)
+footRankRight:SetText("")
+
+local footRankTip = CreateFrame("Button", nil, Frame)
+footRankTip:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD,  -75)
+footRankTip:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -88)
+footRankTip:EnableMouse(true)
+footRankTip:SetFrameLevel(Frame:GetFrameLevel() + 5)
+footRankTip:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMLEFT")
+	GameTooltip:ClearLines()
+	GameTooltip:AddLine("Today's Rank Progress", 1, 0.82, 0)
+	GameTooltip:AddLine(" ", 1,1,1)
+	local base = rankTip._base
+	local gain = rankTip._sGain or "+0.00"
+	local cur  = (rankTip._pct or "?") .. "%"
+	if base then
+		GameTooltip:AddDoubleLine("Day start",  base .. "%", 0.6,0.6,0.6, 0.6,0.6,0.6)
+		GameTooltip:AddDoubleLine("+ Today",    gain .. "%", 0.6,0.6,0.6, 0.45,0.85,0.35)
+		GameTooltip:AddDoubleLine("= Current",  cur,         0.6,0.6,0.6, 1,0.82,0)
+	else
+		GameTooltip:AddDoubleLine("+ Today",    gain .. "%", 0.6,0.6,0.6, 0.45,0.85,0.35)
+		GameTooltip:AddDoubleLine("= Current",  cur,         0.6,0.6,0.6, 1,0.82,0)
+	end
+	GameTooltip:AddLine(" ", 1,1,1)
+	GameTooltip:AddLine("Your rank progress gained today.",     0.5,0.5,0.5)
+	GameTooltip:AddLine("Earning honor increases your rank %.", 0.5,0.5,0.5)
+	GameTooltip:AddLine("At 100% you advance to the next rank.", 0.5,0.5,0.5)
+	GameTooltip:Show()
+end)
+footRankTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+-- ===== Bottom action buttons =====
+local btnDiv = Frame:CreateTexture(nil, "ARTWORK")
+btnDiv:SetTexture(1, 1, 1, 0.12)
+btnDiv:SetHeight(1)
+btnDiv:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD, -92)
+btnDiv:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -92)
+
+local BTN_H  = 20
+local BTN_Y  = -95
+local BTN_W  = INNER_W
+
+local function MakeActionBtn(label, leftOffset, onClick, tipTitle, tipText)
+	local btn = CreateFrame("Button", nil, Frame)
+	btn:SetWidth(BTN_W)
+	btn:SetHeight(BTN_H)
+	btn:SetPoint("TOPLEFT", Frame, "TOPLEFT", leftOffset, BTN_Y)
+	btn:SetBackdrop({
+		bgFile   = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		edgeSize = 8,
+		insets   = { left = 2, right = 2, top = 2, bottom = 2 },
+	})
+	btn:SetBackdropColor(0.10, 0.10, 0.10, 0.85)
+	btn:SetBackdropBorderColor(0.45, 0.45, 0.45, 1.0)
+
+	local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetTexture("Interface\\Buttons\\WHITE8X8")
+	hl:SetAllPoints(btn)
+	hl:SetBlendMode("ADD")
+	hl:SetVertexColor(1, 0.82, 0, 0.08)
+
+	local fs = btn:CreateFontString(nil, "OVERLAY")
+	fs:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+	fs:SetPoint("CENTER", btn, "CENTER", 0, 0)
+	fs:SetJustifyH("CENTER")
+	fs:SetTextColor(0.80, 0.65, 0.10)
+	fs:SetText(label)
+
+	btn:SetScript("OnEnter", function()
+		btn:SetBackdropBorderColor(0.75, 0.75, 0.75, 1.0)
+		fs:SetTextColor(1.0, 0.85, 0.20)
+		if tipTitle then
+			GameTooltip:SetOwner(this, "ANCHOR_BOTTOMLEFT")
+			GameTooltip:ClearLines()
+			GameTooltip:AddLine(tipTitle, 1, 0.82, 0)
+			if tipText then
+				GameTooltip:AddLine(tipText, 0.6, 0.6, 0.6)
+			end
+			GameTooltip:Show()
+		end
+	end)
+	btn:SetScript("OnLeave", function()
+		btn:SetBackdropBorderColor(0.45, 0.45, 0.45, 1.0)
+		fs:SetTextColor(0.80, 0.65, 0.10)
+		GameTooltip:Hide()
+	end)
+	if onClick then btn:SetScript("OnClick", onClick) end
+	return btn
+end
+
+MakeActionBtn("History", PAD, function() if HonorHistory_Open then HonorHistory_Open() end end, "Honor History", "View a full log of your honor sources,\nbattleground results and rank progression.")
 local honorLabel = Frame:CreateFontString(nil, "OVERLAY")
 honorLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
 honorLabel:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -28)
@@ -251,6 +321,7 @@ honorTip:SetPoint("BOTTOMLEFT", Frame, "TOPRIGHT", -80, -52)
 honorTip:EnableMouse(true)
 honorTip:SetFrameLevel(Frame:GetFrameLevel() + 6)
 honorTip._honor = 0
+honorTip._today = 0
 
 honorTip:SetScript("OnEnter", function()
 	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMRIGHT")
@@ -258,21 +329,28 @@ honorTip:SetScript("OnEnter", function()
 	GameTooltip:AddLine("Weekly Honor", 1, 0.82, 0)
 	GameTooltip:AddLine(" ", 1,1,1)
 	local h = honorTip._honor or 0
-	local cap = 20000
 	local hFmt = h >= 1000
 		and string.format("%d,%03d", math.floor(h/1000), h - math.floor(h/1000)*1000)
 		or tostring(h)
-	GameTooltip:AddDoubleLine("This week", hFmt, 0.87,0.73,0.27, 1,1,1)
-	GameTooltip:AddDoubleLine("Weekly cap", "20,000", 0.6,0.6,0.6, 0.6,0.6,0.6)
-	if h >= cap then
+	local HONOR_CAP = 20000
+	local capPct = math.floor(h * 100 / HONOR_CAP)
+	local capFmt = HONOR_CAP >= 1000
+		and string.format("%d,%03d", math.floor(HONOR_CAP/1000), HONOR_CAP - math.floor(HONOR_CAP/1000)*1000)
+		or tostring(HONOR_CAP)
+	GameTooltip:AddDoubleLine("Honor earned", hFmt, 0.6,0.6,0.6, 1,1,1)
+	GameTooltip:AddDoubleLine("Weekly cap", capFmt, 0.6,0.6,0.6, 1,1,1)
+	GameTooltip:AddDoubleLine("Cap progress", capPct .. "%", 0.6,0.6,0.6, 1,1,1)
+	local td = honorTip._today or 0
+	if td > 0 then
+		local tdFmt = td >= 1000
+			and string.format("%d,%03d", math.floor(td/1000), td - math.floor(td/1000)*1000)
+			or tostring(td)
 		GameTooltip:AddLine(" ", 1,1,1)
-		GameTooltip:AddLine("Honor cap reached!", 0.2, 1.0, 0.2)
+		GameTooltip:AddDoubleLine("Today", "+" .. tdFmt, 0.6,0.6,0.6, 0.87,0.73,0.27)
 	end
 	GameTooltip:AddLine(" ", 1,1,1)
-	GameTooltip:AddLine("Honor earned from PvP kills this week.", 0.5, 0.5, 0.5)
-	GameTooltip:AddLine("Resets every Wednesday at 00:00 UTC.", 0.5, 0.5, 0.5)
-	GameTooltip:AddLine("Only the first 20,000 honor counts", 0.5, 0.5, 0.5)
-	GameTooltip:AddLine("toward your rank progression.", 0.5, 0.5, 0.5)
+	GameTooltip:AddLine("Honor resets every Wednesday at midnight UTC.", 0.5,0.5,0.5)
+	GameTooltip:AddLine("You can earn up to " .. capFmt .. " honor per week.", 0.5,0.5,0.5)
 	GameTooltip:Show()
 end)
 honorTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -288,10 +366,11 @@ local function GetLastWedResetUTC()
 	return FIRST_WED_UTC + weeksSince * WEEK_SECS
 end
 
-local sessionStartProgress = nil
+local sessionStartProgress = nil  -- kept for tooltip compat (unused)
 local sessionStartRank     = nil
 local weeklyStartProgress  = nil
 local sessionStartHonor    = nil
+local dayStartProgress     = nil  -- rank progress at start of today (persisted in DB)
 
 local function UpdateOverlay()
 	local pvpRank = UnitPVPRank("player") or 0
@@ -314,47 +393,58 @@ local function UpdateOverlay()
 	local pct = string.format("%.2f", progress * 100)
 	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
 
-	-- Weekly gain % as secondary text next to rank %
-	local wGain = 0
-	local wGainStr = "+0.00"
-	local wStart = weeklyStartProgress or 0
-	if weeklyStartProgress ~= nil then
-		wGain = progress - weeklyStartProgress
-		if wGain < 0 then wGain = 0 end
-		wGainStr = string.format("+%.2f", wGain * 100)
+	-- Today's gain % for the progress bar
+	local sGain = 0
+	local sGainStr = "+0.00"
+	local sStart = dayStartProgress or 0
+	if dayStartProgress ~= nil then
+		sGain = progress - dayStartProgress
+		if sGain < 0 then sGain = 0 end
+		sGainStr = string.format("+%.2f", sGain * 100)
 	end
 
-	-- Rank progress two-tone bar: blue = week start, green = this week's gain
-	rankBarBlue:SetValue(wStart)
-	local bluePixels = wStart * INNER_W
+	-- Rank progress two-tone bar: blue = session start, green = this session's gain
+	rankBarBlue:SetValue(sStart)
+	local bluePixels = sStart * INNER_W
 	local greenWidth = math.max(1, INNER_W - bluePixels)
 	rankBarGreen:SetWidth(greenWidth)
 	rankBarGreen:ClearAllPoints()
 	rankBarGreen:SetPoint("TOPLEFT", rankBarBg, "TOPLEFT", bluePixels, 0)
 	rankBarGreen:SetMinMaxValues(0, greenWidth)
-	rankBarGreen:SetValue(wGain * INNER_W)
+	rankBarGreen:SetValue(sGain * INNER_W)
 
 	local pctStr = string.format("%.2f", progress * 100)
-	local wGainBar = string.format("+%d", wGain * 100)
+	local sGainBar = string.format("+%d", sGain * 100)
 	rankBarText:SetText(pctStr .. "%")
-	rankBarGainText:SetText(wGainBar .. "%")
 	rankTip._pct    = pctStr
-	rankTip._wkGain = wGainStr
-	rankTip._base   = weeklyStartProgress and string.format("%.2f", weeklyStartProgress * 100) or nil
+	rankTip._sGain  = sGainStr
+	rankTip._base   = dayStartProgress and string.format("%.2f", dayStartProgress * 100) or nil
 
-	-- Weekly honor text line
+	-- Weekly honor
 	local weekHonor = 0
 	if GetPVPThisWeekStats then
 		local _, honor = GetPVPThisWeekStats()
 		weekHonor = honor or 0
 	end
+	local HONOR_CAP = 20000
+	local capPct = math.floor(weekHonor * 100 / HONOR_CAP)
 	local honorFmt = weekHonor >= 1000
 		and string.format("%d,%03d", math.floor(weekHonor/1000), weekHonor - math.floor(weekHonor/1000)*1000)
 		or tostring(weekHonor)
-	local honorPct = math.min(weekHonor, 20000) / 200
-	honorLine:SetText(string.format("|cff888888(%d%%)|r  %s", honorPct, honorFmt))
-	honorLine:SetTextColor(1, 1, 1)
+	honorLine:SetText("|cff888888(" .. capPct .. "%)|r " .. honorFmt)
 	honorTip._honor = weekHonor
+	-- Today's honor from honorHistory
+	local todayTotal = 0
+	local hhs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	if hhs and hhs.honorHistory then
+		local todayKey = date("%a %d %b", time())
+		for _, e in ipairs(hhs.honorHistory) do
+			if e.type ~= "bgresult" and date("%a %d %b", e.t) == todayKey then
+				todayTotal = todayTotal + (e.amount or 0)
+			end
+		end
+	end
+	honorTip._today = todayTotal
 	-- Update faction icon
 	local faction, _ = UnitFactionGroup("player")
 	if faction == "Horde" then
@@ -364,6 +454,8 @@ local function UpdateOverlay()
 		honorIcon:SetTexture("Interface\\TargetingFrame\\UI-PVP-Alliance")
 		honorIcon:SetTexCoord(0.09, 0.63, 0.05, 0.63)
 	end
+
+	footRankRight:SetText(sGainStr .. "%")
 end
 
 -- ===== Event Handler =====
@@ -373,8 +465,7 @@ Frame:SetScript("OnEvent", function()
 	if event == "PLAYER_ENTERING_WORLD" then
 		local curProgress = GetPVPRankProgress() or 0
 		local curRank     = UnitPVPRank("player") or 0
-		sessionStartProgress = curProgress
-		sessionStartRank     = curRank
+		sessionStartRank  = curRank
 		local curHonor    = 0
 		if GetPVPThisWeekStats then
 			local _, h = GetPVPThisWeekStats()
@@ -383,6 +474,13 @@ Frame:SetScript("OnEvent", function()
 		sessionStartHonor = curHonor
 		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
 		if hs then
+			-- Day-start progress: persist per calendar day so /reload keeps the baseline
+			local todayKey = date("%Y-%m-%d", time())
+			if hs.dayProgressDate ~= todayKey then
+				hs.dayProgressDate  = todayKey
+				hs.dayStartProgress = curProgress
+			end
+			dayStartProgress = hs.dayStartProgress or curProgress
 			local lastReset = GetLastWedResetUTC()
 			if not hs.weeklyResetStamp or hs.weeklyResetStamp < lastReset then
 				hs.weeklyStartProgress = curProgress
@@ -405,6 +503,7 @@ Frame:SetScript("OnEvent", function()
 			end
 			if hs.overlayHidden then Frame:Hide() else Frame:Show() end
 		else
+			dayStartProgress = curProgress
 			Frame:Show()
 		end
 		UpdateOverlay()

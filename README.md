@@ -1,35 +1,36 @@
-# TurtleHonorSpyEnhanced
+# TurtleHonorSpyEnhanced v2
 
-A PvP rank overlay addon for **Turtle WoW**
 
-> **v2.0 — Patch 1.18.1 Rework**
-> Rebuilt for the new PvP system introduced in Patch 1.18.1. The old bracket-based honor system has been replaced entirely — this version adapts to the new mechanics with more features to come.
+A PvP tracking addon for **Turtle WoW** (Patch 1.18.1+).
 
-<img src="images/race_human_female.jpg" width="15" height="15">&ensp;<img src="images/class_priest.jpg" width="15" height="15">&ensp;**Citrin** (Tel'Abim - TurtleWoW)
+> [!IMPORTANT]
+> **Disable old HonorSpy addons.** HonorSpy, HonorSpyTurtle, and versions of this addon before v2.0 were built for the old bracket-based honor system, which no longer exists. They provide no useful information under the current system and will perform unecessary load. Disable them before using this version.
 
-![Overlay](images/overlay.png)
 
+**<img src="images/race_human_female.jpg" height="16"> <img src="images/class_priest.jpg" height="16"> Citrin - Tel'Abim**
 ## Features
 
-- Track your rank progression
-- Monitor weekly honor toward the 20,000 cap
-- More Features to come soon
+- **Rank overlay** — shows your current rank and weekly honor at a glance
+- **Honor History** (`/hs history`) — scrollable log of every honor source, grouped by day and session, with win/loss records for battlegrounds
+- **Detailed tooltips** — hover any session or day to see a full honor breakdown (kills, BGs, turn-ins, honor/hr)
+
+![Overlay](images/overlay.png)
+![Honor History](images/honorhistory.png)
 
 ## Install
 
-**Recommended: via the Turtle WoW Launcher**
-1. Open the Turtle WoW Launcher and go to **AddOns**
-2. Click **Add new addon** and paste: `https://github.com/dnkrse/TurtleHonorSpyEnhanced.git`
-3. Confirm — the launcher will keep it updated automatically
+**Via the Turtle WoW Launcher**
+1. Go to **AddOns → Add new addon** and paste:
+   `https://github.com/dnkrse/TurtleHonorSpyEnhanced.git`
+2. The launcher keeps it updated automatically.
 
-**Manual install**
-1. Download the latest release (or clone this repo)
-2. Place the `TurtleHonorSpyEnhanced` folder in your `Interface/AddOns/` directory
+**Manual**
+Place the `TurtleHonorSpyEnhanced` folder in `Interface/AddOns/`.
 
 ## Commands
 
 | Command | Action |
 |---|---|
 | `/hs` | Toggle overlay |
-| `/hs show` | Toggle overlay |
-| `/hs version` | Show addon version and author |
+| `/hs history` | Open Honor History window |
+| `/hs version` | Show version |
