@@ -906,8 +906,11 @@ local _collapsed    = {}  -- gKey  → bool; gi==1 stays open, rest auto-collaps
 local _dayCollapsed = {}  -- dayStr → bool; true = day collapsed
 local _weekCollapsed = {} -- weeksAgo number → bool; true = whole week collapsed
 local _knownDays    = {}  -- dayStr → true; all days seen in last RefreshList
-local _hideZero     = false  -- when true, groups/entries with +0 honor are hidden
-local _compactKills = false  -- when true, consecutive kills are merged into one summary row
+-- _VS: view-state flags packed into one table to reduce upvalue pressure on RefreshList
+local _VS = { hideZero = false, compactMode = 0, renderSC = nil }
+-- hideZero: when true, groups/entries with +0 honor are hidden
+-- compactMode: 0=normal, 1=compact (consecutive), 2=merged (one per type), 3=super compact (per day)
+-- renderSC: set to RenderSuperCompactDay after its definition
 
 -- ===== Window state =====
 local Win
@@ -993,9 +996,49 @@ local function ScrollByDelta(delta)
 end
 
 -- ===== Entry-row renderer (split out to reduce upvalue count of RefreshList) =====
--- When _compactKills is true, merge consecutive entries of the same type into summary rows.
+-- When _VS.compactMode >= 1, merge entries of the same type into summary rows.
+-- Mode 1: merge consecutive runs only.  Mode 2+: merge ALL entries of the same type.
 local function CompactEntries(entries, hideZero)
-	if not _compactKills then return entries end
+	if _VS.compactMode == 0 then return entries end
+
+	-- Mode 2 (merged): one row per unique type across the whole group
+	if _VS.compactMode >= 2 then
+		local fixedOrder = { "kill", "award", "turnin" }
+		local buckets  = {}
+		for _, e in ipairs(entries) do
+			local skip = hideZero and (e.amount or 0) == 0
+			if not skip and (e.type == "kill" or e.type == "award" or e.type == "turnin") then
+				local bt = e.type
+				if not buckets[bt] then
+					buckets[bt] = { count = 0, total = 0, firstT = e.t, lastT = e.t, zone = e.zone, subs = {} }
+				end
+				local b = buckets[bt]
+				b.count = b.count + 1
+				b.total = b.total + (e.amount or 0)
+				if e.t < b.lastT  then b.lastT  = e.t end
+				if e.t > b.firstT then b.firstT = e.t end
+				table.insert(b.subs, e)
+			end
+		end
+		local out = {}
+		for _, bt in ipairs(fixedOrder) do
+			local b = buckets[bt]
+			if b then
+				if b.count == 1 then
+					table.insert(out, b.subs[1])
+				else
+					table.insert(out, {
+						type = "_compact", subtype = bt, amount = b.total,
+						count = b.count, t = b.firstT, lastT = b.lastT, zone = b.zone,
+						subEntries = b.subs, merged = true,
+					})
+				end
+			end
+		end
+		return out
+	end
+
+	-- Mode 1 (compact): merge consecutive runs only
 	local out = {}
 	local i = 1
 	local n = table.getn(entries)
@@ -1178,7 +1221,6 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 			local ar, ag, ab = 1, 1, 1
 			local nameText, amtText
 			if e.type == "_compact" then
-				local timeRange = FmtTime(e.lastT) .. "-" .. FmtTime(e.t)
 				local compactLabel
 				if e.subtype == "kill" then
 					compactLabel = "Kills"
@@ -1193,7 +1235,12 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 					compactLabel = "Events"
 					nr, ng, nb = 0.5, 0.5, 0.5; ar, ag, ab = 0.5, 0.5, 0.5
 				end
-				nameText = e.count .. "x " .. compactLabel .. " |cff505050" .. timeRange .. "|r"
+				if e.merged then
+					nameText = e.count .. "x " .. compactLabel
+				else
+					local timeRange = FmtTime(e.lastT) .. "-" .. FmtTime(e.t)
+					nameText = e.count .. "x " .. compactLabel .. " |cff505050" .. timeRange .. "|r"
+				end
 				amtText = "+" .. FmtHonor(e.amount)
 			elseif e.type == "kill" then
 				nameText = (e.victim or "Unknown") .. " |cff505050" .. FmtTime(e.t) .. "|r"
@@ -1243,6 +1290,112 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 	return yOff
 end
 
+-- ===== Super compact: one category-summary row per category per day =====
+local function BuildSuperCompactCatTip(catKey, catLabel, dayGroups)
+	local cr, cg_c, cb = CatColor(catKey)
+	local tip = { title = catLabel, tr = cr, tg = cg_c, tb = cb, lines = {} }
+	local L = tip.lines
+	local total = 0
+	local nGroups = 0
+	local zoneOrder = {}
+	local zoneStats = {}
+	for _, g in ipairs(dayGroups) do
+		if GroupCat(g) == catKey then
+			nGroups = nGroups + 1
+			total = total + g.total
+			local z = g.zone or "Unknown"
+			if not zoneStats[z] then
+				zoneStats[z] = { honor = 0, count = 0 }
+				table.insert(zoneOrder, z)
+			end
+			zoneStats[z].honor = zoneStats[z].honor + g.total
+			zoneStats[z].count = zoneStats[z].count + 1
+		end
+	end
+	-- BG-specific: wins/losses
+	if catKey == "bg" then
+		local nW, nL = 0, 0
+		for _, g in ipairs(dayGroups) do
+			if GroupCat(g) == "bg" and g.result then
+				if g.result == "win" then nW = nW + 1 else nL = nL + 1 end
+			end
+		end
+		local sessStr = nGroups .. " game" .. (nGroups ~= 1 and "s" or "")
+		if nW + nL > 0 then
+			local pct = math.floor(nW * 100 / (nW + nL))
+			sessStr = sessStr .. "  |cff4dff4d" .. nW .. "W|r|cff888888/|r|cffff4d4d" .. nL .. "L|r  " .. pct .. "%"
+		end
+		table.insert(L, { sessStr, nil, 0.45, 0.45, 0.45 })
+	else
+		table.insert(L, { nGroups .. " session" .. (nGroups ~= 1 and "s" or ""), nil, 0.45, 0.45, 0.45 })
+	end
+	table.insert(L, { "", nil })
+	for _, z in ipairs(zoneOrder) do
+		local s = zoneStats[z]
+		local label = z
+		if s.count > 1 then label = label .. " (" .. s.count .. "x)" end
+		table.insert(L, { label, "+" .. FmtHonor(s.honor), cr * 0.85, cg_c * 0.85, cb * 0.85, cr, cg_c, cb })
+	end
+	if table.getn(zoneOrder) > 1 then
+		table.insert(L, { "--------------------", nil, 0.25, 0.25, 0.25 })
+	end
+	table.insert(L, { "Total", "+" .. FmtHonor(total), 1.0, 0.82, 0.0, 0.867, 0.733, 0.267 })
+	return tip
+end
+
+local function RenderSuperCompactDay(dayStr, dayGroups, yOff, hideZero)
+	local catOrder = { "bg", "turnin", "world" }
+	local catLabelMap = { bg = "Battlegrounds", turnin = "Quests", world = "World PvP" }
+	local worldIcon = (UnitFactionGroup("player") == "Horde")
+		and "Interface\\Icons\\INV_BannerPVP_01"
+		or  "Interface\\Icons\\INV_BannerPVP_02"
+	local catIconMap = {
+		bg     = "Interface\\Icons\\INV_Jewelry_Amulet_07",
+		turnin = "Interface\\Icons\\INV_Misc_Coin_04",
+		world  = worldIcon,
+	}
+	local catData = {}
+	for _, ck in ipairs(catOrder) do
+		catData[ck] = { n = 0, total = 0 }
+	end
+	for _, g in ipairs(dayGroups) do
+		if not (hideZero and g.total == 0) then
+			local ck = GroupCat(g)
+			catData[ck].n = catData[ck].n + 1
+			catData[ck].total = catData[ck].total + g.total
+		end
+	end
+	for _, ck in ipairs(catOrder) do
+		local cd = catData[ck]
+		if cd.n > 0 then
+			local cr, cg_c, cb = CatColor(ck)
+			local ei = AcquireEntry()
+			P.ts[ei]:Hide()
+			P.icon[ei]:ClearAllPoints()
+			P.icon[ei]:SetTexture(catIconMap[ck])
+			P.icon[ei]:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+			P.icon[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 28, -yOff)
+			P.icon[ei]:Show()
+			P.name[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 46, -yOff - 1)
+			P.name[ei]:SetText(cd.n .. "x " .. catLabelMap[ck])
+			P.name[ei]:SetTextColor(cr, cg_c, cb)
+			P.amt[ei]:SetPoint("TOPRIGHT", content, "TOPRIGHT", -18, -yOff - 1)
+			P.amt[ei]:SetText("+" .. FmtHonor(cd.total))
+			P.amt[ei]:SetTextColor(cr, cg_c, cb)
+			P.estripe[ei]:SetVertexColor(cr, cg_c, cb)
+			P.estripe[ei]:SetAlpha(0.4)
+			P.estripe[ei]:SetPoint("TOPLEFT",    content, "TOPLEFT", 12, -yOff)
+			P.estripe[ei]:SetPoint("BOTTOMLEFT", content, "TOPLEFT", 12, -yOff - ROW_H)
+			P.estripe[ei]:Show()
+			P.row[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -yOff)
+			P.row[ei]._tip = BuildSuperCompactCatTip(ck, catLabelMap[ck], dayGroups)
+			yOff = yOff + ROW_H
+		end
+	end
+	return yOff
+end
+_VS.renderSC = RenderSuperCompactDay
+
 -- ===== Week helpers (module-level to avoid upvalue pressure in RefreshList) =====
 local function WinPctColor(pct)
 	local r, g, b
@@ -1290,6 +1443,7 @@ local function RefreshList()
 	local groups = BuildGroups(history)
 	local yOff   = 0
 	local lastDate = nil
+	local _scRendered = {}  -- dayStr → true; tracks super-compact days already rendered
 
 	-- Precompute Wednesday reset boundary (epoch day 0 = Thu; +1 offset → Wed = 0)
 	local _now = time()
@@ -1570,7 +1724,13 @@ local function RefreshList()
 
 		if not _weekCollapsed[weeksAgo] then
 		if not _dayCollapsed[dayStr] then
-		if not (_hideZero and g.total == 0) then
+		if _VS.compactMode == 3 then
+		-- Super compact: one row per category per day, rendered once
+		if not _scRendered[dayStr] then
+			_scRendered[dayStr] = true
+			yOff = _VS.renderSC(dayStr, _dayGroupsMap[dayStr] or {}, yOff, _VS.hideZero)
+		end
+		elseif not (_VS.hideZero and g.total == 0) then
 		-- Group header button
 		local gKey = g.gKey
 		if _collapsed[gKey] == nil then
@@ -1683,9 +1843,9 @@ local function RefreshList()
 
 		-- Entry rows (shown when group is expanded)
 		if isOpen then
-			yOff = RenderEntries(g.entries, yOff, cr, cg_c, cb, amtOffset, _hideZero)
+			yOff = RenderEntries(g.entries, yOff, cr, cg_c, cb, amtOffset, _VS.hideZero)
 		end
-		end  -- if not _hideZero group
+		end  -- if _VS.compactMode / _VS.hideZero group
 		end  -- if not _dayCollapsed
 		end  -- if not _weekCollapsed
 		_prevWeeksAgo = weeksAgo
@@ -1860,7 +2020,7 @@ local function CreateHistoryWindow()
 	zeroBtn._tipDesc  = "Hides sessions where no honor was earned."
 
 	local function UpdateZeroBtn()
-		if _hideZero then
+		if _VS.hideZero then
 			zeroFS:SetTextColor(0.25, 0.85, 0.25)
 			zeroBtn._activeColor = { 0.25, 0.85, 0.25 }
 			zeroBtn._tipTitle = "Show Zero Entries"
@@ -1887,24 +2047,38 @@ local function CreateHistoryWindow()
 		GameTooltip:Hide()
 	end)
 	zeroBtn:SetScript("OnClick", function()
-		_hideZero = not _hideZero
+		_VS.hideZero = not _VS.hideZero
 		UpdateZeroBtn()
 		RefreshList()
 	end)
 	UpdateZeroBtn()
 
-	-- Compact Entries toggle button
+	-- Compact Entries toggle button (cycles: off → compact → merged → super compact → off)
 	local compactBtn, compactFS = MakeTitleBtn("C", -62)
 	compactBtn._tipTitle = "Compact Entries"
 	compactBtn._tipDesc  = "Merges consecutive similar entries into summary rows."
 
 	local function UpdateCompactBtn()
-		if _compactKills then
+		if _VS.compactMode == 3 then
+			compactFS:SetText("S")
+			compactFS:SetTextColor(0.55, 0.80, 1.0)
+			compactBtn._activeColor = { 0.55, 0.80, 1.0 }
+			compactBtn._tipTitle = "Super Compact"
+			compactBtn._tipDesc  = "One row per category per day. Click to return to normal."
+		elseif _VS.compactMode == 2 then
+			compactFS:SetText("M")
+			compactFS:SetTextColor(0.85, 0.55, 1.0)
+			compactBtn._activeColor = { 0.85, 0.55, 1.0 }
+			compactBtn._tipTitle = "Merged Compact"
+			compactBtn._tipDesc  = "One row per source type per session. Click for super compact."
+		elseif _VS.compactMode == 1 then
+			compactFS:SetText("C")
 			compactFS:SetTextColor(0.25, 0.85, 0.25)
 			compactBtn._activeColor = { 0.25, 0.85, 0.25 }
-			compactBtn._tipTitle = "Expand Entries"
-			compactBtn._tipDesc  = "Currently compacting similar entries. Click to expand."
+			compactBtn._tipTitle = "Compact Entries"
+			compactBtn._tipDesc  = "Compacting consecutive entries. Click for merged compact."
 		else
+			compactFS:SetText("C")
 			compactFS:SetTextColor(0.80, 0.65, 0.10)
 			compactBtn._activeColor = nil
 			compactBtn._tipTitle = "Compact Entries"
@@ -1926,7 +2100,7 @@ local function CreateHistoryWindow()
 		GameTooltip:Hide()
 	end)
 	compactBtn:SetScript("OnClick", function()
-		_compactKills = not _compactKills
+		_VS.compactMode = math.mod(_VS.compactMode + 1, 4)
 		UpdateCompactBtn()
 		RefreshList()
 	end)
