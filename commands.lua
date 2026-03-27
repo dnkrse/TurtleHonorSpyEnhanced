@@ -22,6 +22,9 @@ SlashCmdList["HONORSPY"] = function(msg)
 	elseif cmd == "minimap" then
 		if HonorSpyMinimap_Toggle then HonorSpyMinimap_Toggle() end
 
+	elseif cmd == "export" then
+		if HonorHistory_Export then HonorHistory_Export() end
+
 	elseif cmd == "help" or cmd == "?" then
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cffFFD100TurtleHonorSpyEnhanced|r commands:", 1, 0.82, 0)
@@ -31,6 +34,8 @@ SlashCmdList["HONORSPY"] = function(msg)
 			"  |cffffff00/hs history|r  — Toggle honor history window", 1, 1, 1)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  |cffffff00/hs minimap|r  — Toggle minimap button", 1, 1, 1)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  |cffffff00/hs export|r   — Export honor data (copy-paste)", 1, 1, 1)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  |cffffff00/hs version|r  — Show addon version", 1, 1, 1)
 		DEFAULT_CHAT_FRAME:AddMessage(

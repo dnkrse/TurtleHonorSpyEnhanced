@@ -2351,3 +2351,197 @@ end
 function HonorHistory_Close()
 	if Win then Win:Hide() end
 end
+
+-- ===== Export: compact data dump for rank/honor analysis =====
+local _exportFrame
+
+local function BuildExportText()
+	local hs = GetDB()
+	if not hs or not hs.honorHistory or table.getn(hs.honorHistory) == 0 then
+		return "-- No honor history data found."
+	end
+	local history = hs.honorHistory
+	local groups = BuildGroups(history)
+	local lines = {}
+
+	-- Header
+	local faction = UnitFactionGroup("player") or "?"
+	local rankNum = UnitPVPRank("player") or 0
+	local rankPct = GetPVPRankProgress() or 0
+	local rankName = ""
+	if rankNum > 0 then
+		rankName = GetPVPRankInfo(rankNum) or ""
+	end
+	table.insert(lines, "-- HonorSpy Export " .. date("%Y-%m-%d %H:%M"))
+	table.insert(lines, "-- Faction: " .. faction .. "  Rank: " .. rankName .. " (" .. rankNum .. ")  Progress: " .. string.format("%.2f", rankPct * 100) .. "%")
+	table.insert(lines, "-- Entries: " .. table.getn(history) .. "  Groups: " .. table.getn(groups))
+	table.insert(lines, "")
+
+	-- Organise groups by day
+	local dayOrder = {}
+	local dayMap   = {}
+	for _, g in ipairs(groups) do
+		local ds = date("%Y-%m-%d", g.startT)
+		if not dayMap[ds] then
+			dayMap[ds] = {}
+			table.insert(dayOrder, ds)
+		end
+		table.insert(dayMap[ds], g)
+	end
+
+	for _, ds in ipairs(dayOrder) do
+		local dgs = dayMap[ds]
+		local dayHonor = 0
+		local dayKills, dayTurnins, dayAwards = 0, 0, 0
+		local dayBGs, dayWins, dayLosses = 0, 0, 0
+		local dayFirstRankPct, dayLastRankPct = nil, nil
+		local dayFirstRankNum, dayLastRankNum = nil, nil
+
+		-- Accumulate day stats + collect rankPct snapshots
+		for _, g in ipairs(dgs) do
+			dayHonor = dayHonor + g.total
+			if g.isBG then
+				dayBGs = dayBGs + 1
+				if g.result == "win"  then dayWins   = dayWins   + 1 end
+				if g.result == "loss" then dayLosses = dayLosses + 1 end
+			end
+			for _, e in ipairs(g.entries) do
+				if e.type == "kill"   then dayKills   = dayKills   + 1 end
+				if e.type == "turnin" then dayTurnins = dayTurnins + 1 end
+				if e.type == "award"  then dayAwards  = dayAwards  + 1 end
+				if e.rankPct ~= nil then
+					if not dayLastRankPct then
+						dayLastRankPct = e.rankPct
+						dayLastRankNum = e.rankNum or 0
+					end
+					dayFirstRankPct = e.rankPct
+					dayFirstRankNum = e.rankNum or 0
+				end
+			end
+		end
+
+		-- Day header line
+		local dayLine = "[" .. ds .. "] honor=" .. math.floor(dayHonor)
+		dayLine = dayLine .. " k=" .. dayKills .. " q=" .. dayTurnins .. " a=" .. dayAwards
+		if dayBGs > 0 then
+			dayLine = dayLine .. " bg=" .. dayBGs .. " w=" .. dayWins .. " l=" .. dayLosses
+		end
+		if dayFirstRankPct then
+			dayLine = dayLine .. " rk=" .. (dayLastRankNum or 0)
+			dayLine = dayLine .. " rpStart=" .. string.format("%.4f", dayFirstRankPct)
+			dayLine = dayLine .. " rpEnd=" .. string.format("%.4f", dayLastRankPct)
+			local gain = dayLastRankPct - dayFirstRankPct
+			if math.abs(gain) > 0.00005 then
+				dayLine = dayLine .. " rpGain=" .. string.format("%.4f", gain)
+			end
+		end
+		table.insert(lines, dayLine)
+
+		-- Per-group lines (indented)
+		for _, g in ipairs(dgs) do
+			local cat = g.isBG and "bg" or (g.isTurnin and "turnin" or "world")
+			local nE = table.getn(g.entries)
+
+			-- Count entry types within group
+			local gk, gt, ga = 0, 0, 0
+			local gFirstRP, gLastRP = nil, nil
+			for _, e in ipairs(g.entries) do
+				if e.type == "kill"   then gk = gk + 1 end
+				if e.type == "turnin" then gt = gt + 1 end
+				if e.type == "award"  then ga = ga + 1 end
+				if e.rankPct ~= nil then
+					if not gLastRP then gLastRP = e.rankPct end
+					gFirstRP = e.rankPct
+				end
+			end
+
+			local gLine = "  " .. date("%H:%M", g.startT)
+			if g.lastT ~= g.startT then
+				gLine = gLine .. "-" .. date("%H:%M", g.lastT)
+			end
+			gLine = gLine .. " " .. cat .. " " .. (g.zone or "?")
+			gLine = gLine .. " h=" .. math.floor(g.total) .. " n=" .. nE
+			if gk > 0 then gLine = gLine .. " k=" .. gk end
+			if gt > 0 then gLine = gLine .. " q=" .. gt end
+			if ga > 0 then gLine = gLine .. " a=" .. ga end
+			if g.result then gLine = gLine .. " r=" .. g.result end
+			if gFirstRP and gLastRP then
+				gLine = gLine .. " rp=" .. string.format("%.4f", gFirstRP)
+					.. ">" .. string.format("%.4f", gLastRP)
+			end
+			table.insert(lines, gLine)
+		end
+		table.insert(lines, "")
+	end
+
+	-- Join with newlines
+	local text = ""
+	for i, ln in ipairs(lines) do
+		if i > 1 then text = text .. "\n" end
+		text = text .. ln
+	end
+	return text
+end
+
+local function ShowExportFrame()
+	if _exportFrame then
+		_exportFrame:Show()
+		return
+	end
+
+	local f = CreateFrame("Frame", "HonorHistoryExportFrame", UIParent)
+	f:SetWidth(520); f:SetHeight(400)
+	f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	f:SetFrameStrata("DIALOG")
+	f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+	f:SetBackdrop({
+		bgFile   = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 16, edgeSize = 16,
+		insets = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+	f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+	f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", function() this:StartMoving() end)
+	f:SetScript("OnDragStop",  function() this:StopMovingOrSizing() end)
+
+	-- Title
+	local title = f:CreateFontString(nil, "OVERLAY")
+	title:SetFont(FONT, 12, "OUTLINE")
+	title:SetPoint("TOP", f, "TOP", 0, -8)
+	title:SetTextColor(1, 0.82, 0)
+	title:SetText("Honor History Export — Ctrl+A, Ctrl+C to copy")
+
+	-- Close button
+	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	closeBtn:SetWidth(20); closeBtn:SetHeight(20)
+	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -4)
+	closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+	-- Scroll frame + EditBox
+	local sf = CreateFrame("ScrollFrame", "HonorHistoryExportScroll", f, "UIPanelScrollFrameTemplate")
+	sf:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -28)
+	sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 8)
+
+	local eb = CreateFrame("EditBox", "HonorHistoryExportEditBox", sf)
+	eb:SetMultiLine(true)
+	eb:SetAutoFocus(false)
+	eb:SetFont(FONT, 10)
+	eb:SetWidth(470)
+	eb:SetTextColor(0.85, 0.85, 0.85)
+	eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+	sf:SetScrollChild(eb)
+
+	_exportFrame = f
+	f._eb = eb
+	f:Show()
+end
+
+function HonorHistory_Export()
+	ShowExportFrame()
+	local text = BuildExportText()
+	_exportFrame._eb:SetText(text)
+	_exportFrame._eb:HighlightText()
+	_exportFrame._eb:SetFocus()
+end
