@@ -14,7 +14,10 @@ A PvP tracking addon for **Turtle WoW** (Patch 1.18.1+).
 - **Honor History** (`/hs history`) — scrollable log of every honor source, grouped by day and session, with win/loss records for battlegrounds
 - **Detailed tooltips** — hover any session or day to see a full honor breakdown (kills, BGs, turn-ins, honor/hr)
 
+Overlay
 ![Overlay](images/overlay.png)
+
+Honor History
 ![Honor History](images/honorhistory.png)
 
 ## Install

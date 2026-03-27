@@ -3,7 +3,7 @@
 ## Notes: PvP rank and honor tracker for Turtle WoW
 ## Author: Citrin (Tel'Abim)
 ## OptionalDeps: Ace2
-## Version: 2.1
+## Version: 2.1.1
 ## X-Category: Battlegrounds/PvP
 ## SavedVariables: HonorSpyDB
 

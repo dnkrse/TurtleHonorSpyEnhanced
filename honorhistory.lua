@@ -346,23 +346,13 @@ local function BuildGroupTip(g)
 		end
 	end
 
-	-- Rank Progress (per group, all categories)
-	local grpLastRankPct  = nil
-	local grpFirstRankPct = nil
-	for _, e in ipairs(g.entries) do
-		if e.rankPct and e.rankPct > 0 then
-			if not grpLastRankPct then grpLastRankPct = e.rankPct end  -- newest entry first
-			grpFirstRankPct = e.rankPct  -- keep updating; ends at oldest entry
-		end
-	end
-	if grpFirstRankPct and grpLastRankPct then
-		local rankGain = grpLastRankPct - grpFirstRankPct
-		if rankGain > 0.00005 then
-			table.insert(L, { "", nil })
-			table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
-			local gainStr = "+" .. string.format("%.2f", rankGain * 100) .. "%"
-			table.insert(L, { "Progress", gainStr, 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
-		end
+	-- Rank Progress (per group, chained to previous group)
+	local rankGain = g.chainedRankGain or 0
+	if rankGain > 0.00005 then
+		table.insert(L, { "", nil })
+		table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
+		local gainStr = "+" .. string.format("%.2f", rankGain * 100) .. "%"
+		table.insert(L, { "Progress", gainStr, 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
 	end
 
 	return tip
@@ -452,6 +442,11 @@ local function BuildWeekTip(label, weekGroups, wTop, wBot)
 			table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
 			if wGain > 0 then
 				table.insert(L, { "Progress", "+" .. string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
+				local pctPoints = wGain * 100
+				if wTotal > 0 and pctPoints > 0 then
+					local honorPer1 = math.floor(wTotal / pctPoints)
+					table.insert(L, { "Honor per 1%", FmtHonor(honorPer1), 0.7, 0.7, 0.7, 0.867, 0.733, 0.267 })
+				end
 			else
 				table.insert(L, { "Net Change", string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
 			end
@@ -554,16 +549,23 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 	if hasRankSection then
 		table.insert(L, { "", nil })
 		table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
+		local rankGain = nil
 		if dayFirstRankPct and dayLastRankPct then
-			local rankGain = dayLastRankPct - dayFirstRankPct
+			rankGain = dayLastRankPct - dayFirstRankPct
 			if rankGain > 0.00005 then
 				local gainStr = "+" .. string.format("%.2f", rankGain * 100) .. "%"
 				table.insert(L, { "Progress", gainStr, 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
+			else
+				rankGain = nil
 			end
 		end
 		if decayPct and decayPct > 0.001 then
 			local lostStr = "-" .. string.format("%.2f", decayPct * 100) .. "%"
 			table.insert(L, { "Decay", lostStr, 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
+		end
+		if rankGain and dayTotal > 0 then
+			local honorPer1 = math.floor(dayTotal / (rankGain * 100))
+			table.insert(L, { "Honor per 1%", FmtHonor(honorPer1), 0.7, 0.7, 0.7, 0.867, 0.733, 0.267 })
 		end
 	end
 
@@ -905,6 +907,7 @@ local _dayCollapsed = {}  -- dayStr → bool; true = day collapsed
 local _weekCollapsed = {} -- weeksAgo number → bool; true = whole week collapsed
 local _knownDays    = {}  -- dayStr → true; all days seen in last RefreshList
 local _hideZero     = false  -- when true, groups/entries with +0 honor are hidden
+local _compactKills = false  -- when true, consecutive kills are merged into one summary row
 
 -- ===== Window state =====
 local Win
@@ -990,8 +993,122 @@ local function ScrollByDelta(delta)
 end
 
 -- ===== Entry-row renderer (split out to reduce upvalue count of RefreshList) =====
+-- When _compactKills is true, merge consecutive entries of the same type into summary rows.
+local function CompactEntries(entries, hideZero)
+	if not _compactKills then return entries end
+	local out = {}
+	local i = 1
+	local n = table.getn(entries)
+	while i <= n do
+		local e = entries[i]
+		local skip = hideZero and (e.amount or 0) == 0
+		if not skip and (e.type == "kill" or e.type == "award" or e.type == "turnin") then
+			local runType = e.type
+			local count = 1
+			local total = e.amount or 0
+			local firstT = e.t
+			local lastT  = e.t
+			local j = i + 1
+			while j <= n and entries[j].type == runType do
+				local ej = entries[j]
+				if not (hideZero and (ej.amount or 0) == 0) then
+					count = count + 1
+					total = total + (ej.amount or 0)
+					lastT = ej.t
+				end
+				j = j + 1
+			end
+			if count > 1 then
+				local subEntries = {}
+				for k = i, j - 1 do
+					if not (hideZero and (entries[k].amount or 0) == 0) then
+						table.insert(subEntries, entries[k])
+					end
+				end
+				table.insert(out, {
+					type = "_compact", subtype = runType, amount = total,
+					count = count, t = firstT, lastT = lastT, zone = e.zone,
+					subEntries = subEntries,
+				})
+			else
+				table.insert(out, e)
+			end
+			i = j
+		else
+			table.insert(out, e)
+			i = i + 1
+		end
+	end
+	return out
+end
+
+local function BuildCompactTip(e)
+	local st = e.subtype
+	local titleLabel, tr, tg, tb
+	if st == "kill" then
+		titleLabel = "Kills"
+		tr, tg, tb = 0.75, 0.75, 0.75
+	elseif st == "turnin" then
+		titleLabel = "Quests"
+		tr, tg, tb = 0.55, 0.80, 1.0
+	elseif st == "award" then
+		titleLabel = "Bonus"
+		tr, tg, tb = 0.867, 0.733, 0.267
+	else
+		titleLabel = "Events"
+		tr, tg, tb = 0.5, 0.5, 0.5
+	end
+	local tip = { title = e.count .. "x " .. titleLabel, tr = tr, tg = tg, tb = tb, lines = {} }
+	local L = tip.lines
+
+	-- Time range
+	local span = (e.t and e.lastT) and math.abs(e.t - e.lastT) or 0
+	if e.t then
+		local tstr = (e.t ~= e.lastT)
+			and (FmtTime(e.lastT) .. " - " .. FmtTime(e.t))
+			or FmtTime(e.t)
+		if span > 60 then tstr = tstr .. "  (" .. math.floor(span / 60) .. "m)" end
+		table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
+	end
+	table.insert(L, { "", nil })
+
+	-- Individual entries
+	local subs = e.subEntries or {}
+	local maxShow = 15
+	local shown = 0
+	for _, se in ipairs(subs) do
+		if shown >= maxShow then
+			local remaining = table.getn(subs) - maxShow
+			table.insert(L, { "... +" .. remaining .. " more", nil, 0.4, 0.4, 0.4 })
+			break
+		end
+		local leftText
+		if st == "kill" then
+			leftText = (se.victim or "Unknown")
+		elseif st == "turnin" then
+			leftText = se.questName or (se.zone or "Mark")
+		elseif st == "award" then
+			leftText = (se.zone or "Bonus")
+		else
+			leftText = (se.zone or "?")
+		end
+		local rightText = "+" .. FmtHonor(se.amount or 0)
+		table.insert(L, { leftText, rightText, tr * 0.85, tg * 0.85, tb * 0.85, tr, tg, tb })
+		shown = shown + 1
+	end
+
+	-- Divider + total
+	if table.getn(subs) > 1 then
+		table.insert(L, { "--------------------", nil, 0.25, 0.25, 0.25 })
+	end
+	table.insert(L, { "Total", "+" .. FmtHonor(e.amount), 1.0, 0.82, 0.0, 0.867, 0.733, 0.267 })
+
+	return tip
+end
+
 local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
-	for _, e in ipairs(entries) do
+	local renderList = CompactEntries(entries, hideZero)
+	for _, e in ipairs(renderList) do
 		if not (hideZero and (e.amount or 0) == 0) then
 			local ei = AcquireEntry()
 			P.ts[ei]:Hide()
@@ -999,7 +1116,25 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				and e.questName
 				and _CONCERTED_QUEST[string.lower(e.questName)]
 			P.icon2[ei]:Hide(); P.icon3[ei]:Hide()
-			if isConcerted then
+			if e.type == "_compact" then
+				-- Compact summary row — pick icon by subtype
+				local compactIcon
+				if e.subtype == "kill" then
+					compactIcon = "Interface\\Icons\\Ability_SteelMelee"
+				elseif e.subtype == "turnin" then
+					compactIcon = _BG_MARK_ICON[e.zone] or "Interface\\Icons\\INV_Misc_Coin_04"
+				elseif e.subtype == "award" then
+					compactIcon = _BG_MARK_ICON[e.zone] or "Interface\\Icons\\INV_Misc_Coin_02"
+				else
+					compactIcon = "Interface\\Icons\\INV_Misc_QuestionMark"
+				end
+				P.icon[ei]:ClearAllPoints()
+				P.icon[ei]:SetTexture(compactIcon)
+				P.icon[ei]:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+				P.icon[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 28, -yOff)
+				P.icon[ei]:Show()
+				P.name[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 46, -yOff - 1)
+			elseif isConcerted then
 				P.icon[ei]:ClearAllPoints()
 				P.icon[ei]:SetTexture(_BG_MARK_ICON["Warsong Gulch"])
 				P.icon[ei]:SetTexCoord(0.05, 0.95, 0.05, 0.95)
@@ -1042,7 +1177,25 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 			local nr, ng, nb = 1, 1, 1
 			local ar, ag, ab = 1, 1, 1
 			local nameText, amtText
-			if e.type == "kill" then
+			if e.type == "_compact" then
+				local timeRange = FmtTime(e.lastT) .. "-" .. FmtTime(e.t)
+				local compactLabel
+				if e.subtype == "kill" then
+					compactLabel = "Kills"
+					nr, ng, nb = 0.75, 0.75, 0.75; ar, ag, ab = 0.75, 0.75, 0.75
+				elseif e.subtype == "turnin" then
+					compactLabel = "Quests"
+					nr, ng, nb = 0.55, 0.80, 1.0; ar, ag, ab = 0.55, 0.80, 1.0
+				elseif e.subtype == "award" then
+					compactLabel = "Bonus"
+					nr, ng, nb = 0.867, 0.733, 0.267; ar, ag, ab = 0.867, 0.733, 0.267
+				else
+					compactLabel = "Events"
+					nr, ng, nb = 0.5, 0.5, 0.5; ar, ag, ab = 0.5, 0.5, 0.5
+				end
+				nameText = e.count .. "x " .. compactLabel .. " |cff505050" .. timeRange .. "|r"
+				amtText = "+" .. FmtHonor(e.amount)
+			elseif e.type == "kill" then
 				nameText = (e.victim or "Unknown") .. " |cff505050" .. FmtTime(e.t) .. "|r"
 				nr, ng, nb = 0.75, 0.75, 0.75; ar, ag, ab = 0.75, 0.75, 0.75
 				amtText = "+" .. FmtHonor(e.amount)
@@ -1079,7 +1232,11 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 			P.estripe[ei]:SetPoint("BOTTOMLEFT", content, "TOPLEFT", 12, -yOff - ROW_H)
 			P.estripe[ei]:Show()
 			P.row[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -yOff)
-			P.row[ei]._tip = nil
+			if e.type == "_compact" then
+				P.row[ei]._tip = BuildCompactTip(e)
+			else
+				P.row[ei]._tip = nil
+			end
 			yOff = yOff + ROW_H
 		end
 	end
@@ -1170,7 +1327,7 @@ local function RefreshList()
 		end
 		_weekHonor[wa] = (_weekHonor[wa] or 0) + g.total
 		for _, e in ipairs(g.entries) do
-			if e.rankPct and e.rankPct > 0 then
+			if e.rankPct ~= nil then
 				if not _dayTopRankPct[ds] then
 					_dayTopRankPct[ds] = e.rankPct
 					_dayTopRankNum[ds] = e.rankNum or 0
@@ -1186,6 +1343,48 @@ local function RefreshList()
 		local t = 0
 		for _, dg in ipairs(dgs) do t = t + dg.total end
 		_dayTotals[ds] = t
+	end
+
+	-- Pre-compute chained rank gain per group.
+	-- Groups are newest-first; within each day, chain so that:
+	--   group[i].chainedRankGain = group[i].newestRankPct - group[i+1].newestRankPct
+	-- The oldest group in each day uses its own oldest-to-newest span.
+	-- This guarantees the sum of all group gains = day total gain.
+	for _, g in ipairs(groups) do
+		-- Find this group's newest and oldest rankPct
+		local top, bot = nil, nil
+		for _, e in ipairs(g.entries) do
+			if e.rankPct ~= nil then
+				if not top then top = e.rankPct end
+				bot = e.rankPct
+			end
+		end
+		g._rankPctTop = top
+		g._rankPctBot = bot
+	end
+	for ds, dgs in pairs(_dayGroupsMap) do
+		-- dgs is newest-first (same order as groups)
+		local n = table.getn(dgs)
+		for i = 1, n do
+			local g = dgs[i]
+			if i < n then
+				-- Chain to next group (chronologically previous)
+				local prevTop = dgs[i + 1]._rankPctTop
+				if g._rankPctTop and prevTop then
+					g.chainedRankGain = g._rankPctTop - prevTop
+				else
+					g.chainedRankGain = 0
+				end
+			else
+				-- Oldest group in the day: use its own span
+				if g._rankPctTop and g._rankPctBot then
+					g.chainedRankGain = g._rankPctTop - g._rankPctBot
+				else
+					g.chainedRankGain = 0
+				end
+			end
+			if g.chainedRankGain < 0.00005 then g.chainedRankGain = 0 end
+		end
 	end
 
 	local _prevWeeksAgo = nil
@@ -1303,7 +1502,7 @@ local function RefreshList()
 			local dayFirstRankPct, dayLastRankPct, dayLastRankNum = nil, nil, 0
 			for _, _dg in ipairs(_dayGroupsMap[dayStr] or {}) do
 				for _, _de in ipairs(_dg.entries) do
-					if _de.rankPct and _de.rankPct > 0 then
+					if _de.rankPct ~= nil then
 						if not dayLastRankPct then
 							dayLastRankPct = _de.rankPct
 							dayLastRankNum = _de.rankNum or 0
@@ -1437,7 +1636,7 @@ local function RefreshList()
 -- Rank progression + current rank icon/pct
 			local grpLastRankPct, grpFirstRankPct, grpLastRankNum = nil, nil, 0
 			for _, _e in ipairs(g.entries) do
-				if _e.rankPct and _e.rankPct > 0 then
+				if _e.rankPct ~= nil then
 					if not grpLastRankPct then
 						grpLastRankPct = _e.rankPct
 						grpLastRankNum = _e.rankNum or 0
@@ -1451,7 +1650,7 @@ local function RefreshList()
 				local _, t = GetPVPRankInfo(grpLastRankNum)
 				grpRankTex = t or grpLastRankNum
 			end
-			local grpRankGain = (grpFirstRankPct and grpLastRankPct) and (grpLastRankPct - grpFirstRankPct) or 0
+			local grpRankGain = g.chainedRankGain or 0
 			-- _ra always flush right; _rp to its left when gain>0; no rank icon/pct on group rows
 			btn._rankIcon:Hide()
 			btn._rankPctVal:Hide()
@@ -1693,6 +1892,45 @@ local function CreateHistoryWindow()
 		RefreshList()
 	end)
 	UpdateZeroBtn()
+
+	-- Compact Entries toggle button
+	local compactBtn, compactFS = MakeTitleBtn("C", -62)
+	compactBtn._tipTitle = "Compact Entries"
+	compactBtn._tipDesc  = "Merges consecutive similar entries into summary rows."
+
+	local function UpdateCompactBtn()
+		if _compactKills then
+			compactFS:SetTextColor(0.25, 0.85, 0.25)
+			compactBtn._activeColor = { 0.25, 0.85, 0.25 }
+			compactBtn._tipTitle = "Expand Entries"
+			compactBtn._tipDesc  = "Currently compacting similar entries. Click to expand."
+		else
+			compactFS:SetTextColor(0.80, 0.65, 0.10)
+			compactBtn._activeColor = nil
+			compactBtn._tipTitle = "Compact Entries"
+			compactBtn._tipDesc  = "Merges consecutive similar entries into summary rows."
+		end
+	end
+	compactBtn:SetScript("OnEnter", function()
+		compactBtn:SetBackdropBorderColor(0.75, 0.75, 0.75, 1.0)
+		compactFS:SetTextColor(1.0, 0.85, 0.20)
+		GameTooltip:SetOwner(this, "ANCHOR_BOTTOMLEFT")
+		GameTooltip:ClearLines()
+		GameTooltip:AddLine(compactBtn._tipTitle, 1, 0.82, 0)
+		GameTooltip:AddLine(compactBtn._tipDesc, 0.6, 0.6, 0.6)
+		GameTooltip:Show()
+	end)
+	compactBtn:SetScript("OnLeave", function()
+		compactBtn:SetBackdropBorderColor(0.45, 0.45, 0.45, 1.0)
+		UpdateCompactBtn()
+		GameTooltip:Hide()
+	end)
+	compactBtn:SetScript("OnClick", function()
+		_compactKills = not _compactKills
+		UpdateCompactBtn()
+		RefreshList()
+	end)
+	UpdateCompactBtn()
 
 	-- Column header bar (sits between title divider and scroll frame)
 	local colHdr = CreateFrame("Frame", nil, Win)
