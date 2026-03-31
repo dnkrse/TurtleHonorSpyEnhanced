@@ -1,4 +1,4 @@
-﻿-- HonorHistory: honor log
+-- HonorHistory: honor log
 -- WoW 1.12 / Lua 5.0 — no string.match, 32-upvalue-per-function limit
 
 local WIN_W = 420
@@ -18,6 +18,12 @@ local _IsBG = {
 	["Alterac Valley"]= true,
 	["Thorn Gorge"]   = true,
 	["Blood Ring"]    = true,
+    -- zhCN locale
+    ["战歌峡谷"] = true,
+    ["阿拉希盆地"] = true,
+    ["奥特兰克山谷"] = true,
+    ["荆棘峡谷"] = true,
+    ["血环"]     = true,
 }
 
 local _ZONE_ABBR = {
@@ -26,6 +32,12 @@ local _ZONE_ABBR = {
 	["Alterac Valley"]= "AV",
 	["Thorn Gorge"]   = "Thorn",
 	["Blood Ring"]    = "Blood",
+    -- zhCN locale
+    ["战歌峡谷"] = "WSG",
+    ["阿拉希盆地"] = "AB",
+    ["奥特兰克山谷"] = "AV",
+    ["荆棘峡谷"] = "Thorn",
+    ["血环"]    = "Blood",
 }
 
 local function IsBGZone(zone)
@@ -39,12 +51,21 @@ local _BG_MARK_ICON = {
 	["Alterac Valley"]= "Interface\\Icons\\INV_Jewelry_Necklace_21",
 	["Thorn Gorge"]   = "Interface\\Icons\\INV_Jewelry_Talisman_04",
 	["Blood Ring"]    = "Interface\\Icons\\INV_Jewelry_Talisman_05",
+    -- zhCN locale
+    ["战歌峡谷"]   = "Interface\\Icons\\INV_Misc_Rune_07",
+    ["阿拉希盆地"] = "Interface\\Icons\\INV_Jewelry_Amulet_07",
+    ["奥特兰克山谷"]= "Interface\\Icons\\INV_Jewelry_Necklace_21",
+    ["荆棘峡谷"]   = "Interface\\Icons\\INV_Jewelry_Talisman_04",
+    ["血环"]       = "Interface\\Icons\\INV_Jewelry_Talisman_05",
 }
 
 -- Quests that turn in marks from all three main BGs simultaneously
 local _CONCERTED_QUEST = {
 	["concerted efforts"] = true,  -- Alliance
 	["for great honor"]   = true,  -- Horde
+    -- zhCN locale
+    ["共同的努力"] = true,  -- Alliance zhCN
+    ["无上的荣誉"] = true,  -- Horde zhCN
 }
 
 -- ===== Rank lookup =====
@@ -63,6 +84,21 @@ local _RANK_TO_NUM = {
 	["marshal"]=12,        ["general"]=12,
 	["field marshal"]=13,  ["warlord"]=13,
 	["grand marshal"]=14,  ["high warlord"]=14,
+    -- zhCN locale (Alliance / Horde)
+    ["列兵"]=1,  ["斥候"]=1,
+    ["下士"]=2,  ["步兵"]=2,
+    ["中士"]=3,
+    ["军士长"]=4, ["高阶军士"]=4,
+    ["士官长"]=5, ["一等军士长"]=5,
+    ["骑士"]=6,  ["石头守卫"]=6,
+    ["骑士中尉"]=7, ["血卫士"]=7,
+    ["骑士队长"]=8, ["军团士兵"]=8,
+    ["护卫骑士"]=9, ["百夫长"]=9,
+    ["少校"]=10, ["勇士"]=10,
+    ["司令"]=11, ["中将"]=11,
+    ["统帅"]=12, ["将军"]=12,
+    ["元帅"]=13, ["督军"]=13,
+    ["大元帅"]=14, ["高阶督军"]=14,
 }
 
 local function GetRankNum(rankName)
@@ -2014,17 +2050,21 @@ _ef:SetScript("OnEvent", function()
 		or event == "CHAT_MSG_BG_SYSTEM_HORDE" then
 		if not hs then return end
 		if not hs.honorHistory then hs.honorHistory = {} end
-		local msg = string.lower(arg1 or "")
+		local rawMsg = arg1 or ""
+		local msg = string.lower(rawMsg)
 		local result = nil
+		-- Win/loss detection: English + zhCN
 		local hasWin = string.find(msg, "win") or string.find(msg, "victori") or string.find(msg, "conquer")
+		    or string.find(rawMsg, "胜利") or string.find(rawMsg, "获胜") or string.find(rawMsg, "赢得")
 		local hasLoss = string.find(msg, "defea") or string.find(msg, "lost the battle")
+		    or string.find(rawMsg, "失败") or string.find(rawMsg, "战败") or string.find(rawMsg, "落败")
 		if hasWin and not hasLoss then
 			-- "wins" appears in both "Alliance wins" and "Horde wins", so
 			-- compare which faction is winning against the player's own faction.
 			local playerFaction = string.lower(UnitFactionGroup("player") or "")
 			local factionInMsg = nil
-			if string.find(msg, "alliance") then factionInMsg = "alliance" end
-			if string.find(msg, "horde")    then factionInMsg = "horde"    end
+			if string.find(msg, "alliance") or string.find(rawMsg, "联盟") then factionInMsg = "alliance" end
+			if string.find(msg, "horde")    or string.find(rawMsg, "部落") then factionInMsg = "horde"    end
 			if factionInMsg and playerFaction ~= "" and factionInMsg ~= playerFaction then
 				result = "loss"
 			else
@@ -2052,8 +2092,11 @@ _ef:SetScript("OnEvent", function()
 		local msg = arg1 or ""
 		local lmsg = string.lower(msg)
 
-		-- "You have been awarded X honor points."
+		-- "You have been awarded X honor points." (English + zhCN variants)
 		local _, _, awardedStr = string.find(lmsg, "awarded (%d+) honor")
+		if not awardedStr then _, _, awardedStr = string.find(lmsg, "(%d+) honor") end
+		if not awardedStr then _, _, awardedStr = string.find(msg, "获得了?(%d+)点?荣誉") end
+		if not awardedStr then _, _, awardedStr = string.find(msg, "(%d+)点荣誉") end
 		if awardedStr then
 			if not hs then return end
 			if not hs.honorHistory then hs.honorHistory = {} end
@@ -2081,8 +2124,8 @@ _ef:SetScript("OnEvent", function()
 			return
 		end
 
-		-- Quest turn-in fallback: "You have completed..."
-		if string.find(lmsg, "completed") then
+		-- Quest turn-in fallback: "You have completed..." (English + zhCN)
+		if string.find(lmsg, "completed") or string.find(msg, "完成了") or string.find(msg, "已完成") then
 			local bg = QuestToBG(msg)
 			if bg then
 				_pendingQuest   = bg
@@ -2118,11 +2161,18 @@ _ef:SetScript("OnEvent", function()
 			return
 		end
 
-		-- Award/gain message
+		-- Award/gain: try every known English variant + zhCN + broad fallback
 		local _, _, a = string.find(lmsg, "awarded (%d+) honor")
-		if not a then
-			_, _, a = string.find(lmsg, "you gain (%d+) honor")
-		end
+		if not a then _, _, a = string.find(lmsg, "you gain (%d+) honor") end
+		if not a then _, _, a = string.find(lmsg, "you gained (%d+) honor") end
+		if not a then _, _, a = string.find(lmsg, "receive (%d+) honor") end
+		if not a then _, _, a = string.find(lmsg, "(%d+) honor") end
+		-- zhCN: "获得了150点荣誉值" / "150点荣誉"
+		if not a then _, _, a = string.find(msg, "获得了?(%d+)点?荣誉") end
+		if not a then _, _, a = string.find(msg, "(%d+)点荣誉") end
+		-- Last resort: first number in a dedicated honor-gain event (safe since
+		-- CHAT_MSG_COMBAT_HONOR_GAIN fires only for honor-related messages)
+		if not a then _, _, a = string.find(lmsg, "(%d+)") end
 		if not a then return end
 		local amount = tonumber(a) or 0
 		local zone = GetRealZoneText()
