@@ -115,11 +115,18 @@ SlashCmdList["HSVER"] = function(msg)
 				"|cffFFD100THSE:|r No history to clean.", 1, 0.3, 0.3)
 		end
 
+	elseif cmd == "debug drift" then
+		THSE:DebugDrift()
+
 	else
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cffFFD100TurtleHonorSpyEnhanced:|r v" .. (THSE.version or "?"), 1, 0.82, 0)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  /hsver debug — full debug dump (copy window)", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver debug drift — honor drift analysis (copy window)", 0.7, 0.7, 0.7)
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"  /hsver debug scoreboard — BG scoreboard cache", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"  /hsver database — DB state summary (chat)", 0.7, 0.7, 0.7)
 		DEFAULT_CHAT_FRAME:AddMessage(

@@ -57,6 +57,7 @@ HonorSpy:RegisterDefaults('realm', {
 		addonUsers          = {},
 		weeklyStartProgress = nil,
 		weeklyResetStamp    = 0,
+		weekApiHonor        = {},
 		sessionStartHonor   = 0,
 		honorHistory        = {},
 		histCollapsed       = {},

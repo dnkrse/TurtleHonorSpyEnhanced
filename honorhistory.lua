@@ -26,6 +26,15 @@ local _ZONE_ABBR    = THSE.ZONE_ABBR
 local _BG_MARK_ICON = THSE.BG_MARK_ICON
 local GetDailyBG    = THSE.GetDailyBG
 
+-- Return the daily BG for a local calendar day by snapping to local noon.
+-- Avoids the UTC/local mismatch in the hours between local and UTC midnight.
+local function DailyBGForDay(t)
+	local h = tonumber(date("%H", t)) or 12
+	local m = tonumber(date("%M", t)) or 0
+	local s = tonumber(date("%S", t)) or 0
+	return GetDailyBG(t - (h * 3600 + m * 60 + s) + 43200)
+end
+
 local function IsBGZone(zone)
 	return zone and _IsBG[zone] == true
 end
@@ -616,7 +625,7 @@ local function BuildDayTip(dayStr, dayGroups, decayPct, isToday)
 			or FmtTime(dayFirstT)
 		if dayActiveTime > 60 then tstr = tstr .. "  (" .. FmtDuration(dayActiveTime) .. ")" end
 		table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
-		local dailyBG = GetDailyBG(dayFirstT)
+		local dailyBG = DailyBGForDay(dayFirstT)
 		if dailyBG then
 			table.insert(L, { "Daily BG", dailyBG, 0.55, 0.55, 0.55, 1.0, 0.82, 0.0 })
 		end
@@ -1070,7 +1079,7 @@ local _dayCollapsed = {}  -- dayStr → bool; true = day collapsed
 local _weekCollapsed = {} -- weeksAgo number → bool; true = whole week collapsed
 local _knownDays    = {}  -- dayStr → true; all days seen in last RefreshList
 -- _VS: view-state flags packed into one table to reduce upvalue pressure on RefreshList
-local _VS = { hideZero = false, compactMode = 0, renderSC = nil, dailyBG = GetDailyBG, bgIcons = _BG_MARK_ICON, knownWeeks = {} }
+local _VS = { hideZero = false, compactMode = 0, renderSC = nil, dailyBG = DailyBGForDay, bgIcons = _BG_MARK_ICON, knownWeeks = {} }
 -- hideZero: when true, groups/entries with +0 honor are hidden
 -- compactMode: 0=normal, 1=compact (consecutive), 2=merged (one per type), 3=super compact (per day)
 -- renderSC: set to RenderSuperCompactDay after its definition
@@ -1628,17 +1637,17 @@ _VS.renderSC = RenderSuperCompactDay
 local function WinPctColor(pct)
 	local r, g, b
 	if pct <= 50 then
-		local t = (pct / 50)
-		local c = t * t
-		r = math.floor(220 - 84  * c)
-		g = math.floor(70  + 66  * c)
-		b = math.floor(70  + 66  * c)
+		-- Red (ff4d4d) at 0% → Pale yellow (ffffaa) at 50%
+		local t = pct / 50
+		r = 255
+		g = math.floor(77 + 178 * t)
+		b = math.floor(77 + 93 * t)
 	else
+		-- Pale yellow (ffffaa) at 50% → Green (4dff4d) at 100%
 		local t = (pct - 50) / 50
-		local c = t * t
-		r = math.floor(136 - 66  * c)
-		g = math.floor(136 + 84  * c)
-		b = math.floor(136 - 66  * c)
+		r = math.floor(255 - 178 * t)
+		g = 255
+		b = math.floor(170 - 93 * t)
 	end
 	return string.format("%02x%02x%02x", r, g, b)
 end
@@ -1803,11 +1812,15 @@ local function RefreshList()
 			local wLabelBright = math.max(0.35, 1.0 - weeksAgo * 0.25)
 			wsep._fs:SetTextColor(wLabelBright, wLabelBright, wLabelBright)
 			wsep._fs:SetText(WeekLabel(weeksAgo, _thisResetT))
-			-- Honor total: use API for current week, tracked sum for past weeks
+			-- Honor total: use API for current week, stored snapshot for past weeks
 			local wHonor = _weekHonor[weeksAgo] or 0
 			if weeksAgo == 0 and GetPVPThisWeekStats then
 				local _, apiHonor = GetPVPThisWeekStats()
 				if apiHonor and apiHonor > wHonor then wHonor = apiHonor end
+			else
+				local snapKey = tostring(_thisResetT - weeksAgo * 604800)
+				local snap = hs and hs.weekApiHonor and hs.weekApiHonor[snapKey]
+				if snap and snap > wHonor then wHonor = snap end
 			end
 			if wHonor > 0 then
 				wsep._hdrAmt:SetText("|cffddbb44+" .. FmtHonor(math.floor(wHonor)) .. "|r")
@@ -1879,6 +1892,9 @@ local function RefreshList()
 			if weeksAgo == 0 and GetPVPThisWeekStats then
 				local _, ah = GetPVPThisWeekStats()
 				wApiHonor = ah
+			else
+				local snapKey = tostring(_thisResetT - weeksAgo * 604800)
+				wApiHonor = hs and hs.weekApiHonor and hs.weekApiHonor[snapKey]
 			end
 			wsep._tip = BuildWeekTip(WeekLabel(weeksAgo, _thisResetT), weekGroups, wTop, wBot, wApiHonor)
 			wsep:SetScript("OnEnter", function() ShowGroupTip(this, this._tip) end)
@@ -1961,7 +1977,7 @@ local function RefreshList()
 			-- Decay detection: Wednesday rankPct start lower than previous calendar day rankPct end
 			local prevDayStr = date("%a %d %b", g.startT - 86400)
 			local prevDK = prevDayStr .. "|" .. (weeksAgo + 1)
-			local decayOccurred = (string.sub(dayStr, 1, 3) == "Wed") and weeksAgo == 0
+			local decayOccurred = (string.sub(dayStr, 1, 3) == "Wed")
 				and _dayBotRankPct[dk] ~= nil
 				and _dayTopRankPct[prevDK] ~= nil
 				and (_dayTopRankPct[prevDK] - _dayBotRankPct[dk] > 0.001)

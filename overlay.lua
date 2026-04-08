@@ -508,6 +508,14 @@ local function UpdateOverlay()
 		local _, honor = GetPVPThisWeekStats()
 		weekHonor = honor or 0
 	end
+	-- Continuously snapshot current week's API honor so it's in DB before reset
+	if weekHonor > 0 and hs then
+		if not hs.weekApiHonor then hs.weekApiHonor = {} end
+		local curResetKey = tostring(GetLastWedResetUTC())
+		if not hs.weekApiHonor[curResetKey] or weekHonor > hs.weekApiHonor[curResetKey] then
+			hs.weekApiHonor[curResetKey] = weekHonor
+		end
+	end
 	local HONOR_CAP = 20000
 	local capPct = math.floor(weekHonor * 100 / HONOR_CAP)
 	local honorFmt = weekHonor >= 1000
@@ -564,6 +572,19 @@ Frame:SetScript("OnEvent", function()
 			end
 			dayStartProgress = hs.dayStartProgress or curProgress
 			local lastReset = GetLastWedResetUTC()
+			-- Back-fill last week's honor from API if continuous snapshot missed it
+			-- Runs every login (guarded by key-existence check) so it catches the
+			-- window where GetPVPLastWeekStats still returns last week's data.
+			if not hs.weekApiHonor then hs.weekApiHonor = {} end
+			local prevResetKey = tostring(lastReset - 604800)
+			if not hs.weekApiHonor[prevResetKey] then
+				if GetPVPLastWeekStats then
+					local _, _, lwHonor = GetPVPLastWeekStats()
+					if lwHonor and lwHonor > 0 then
+						hs.weekApiHonor[prevResetKey] = lwHonor
+					end
+				end
+			end
 			if not hs.weeklyResetStamp or hs.weeklyResetStamp < lastReset then
 				hs.weeklyStartProgress = curProgress
 				hs.weeklyResetStamp    = lastReset

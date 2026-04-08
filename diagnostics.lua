@@ -172,8 +172,8 @@ function THSE:DebugLog()
 	local thisW_hk, thisW_h, thisW_dk = 0, 0, 0
 	local lastW_h, lastW_dk = 0, 0
 	local life_hk = 0
-	if GetPVPThisWeekStats  then thisW_hk, thisW_h, thisW_dk = GetPVPThisWeekStats() end
-	if GetPVPLastWeekStats  then _, lastW_h, lastW_dk = GetPVPLastWeekStats() end
+	if GetPVPThisWeekStats  then thisW_hk, thisW_h = GetPVPThisWeekStats() end
+	if GetPVPLastWeekStats  then _, _, lastW_h = GetPVPLastWeekStats() end
 	if GetPVPLifetimeStats  then life_hk = GetPVPLifetimeStats() end
 	p(string.format("rank=%d  pct=%.10f", rankNum, rankPct))
 	p(string.format("thisWeek  hk=%s  honor=%s  dk=%s", tostring(thisW_hk), tostring(thisW_h), tostring(thisW_dk)))
@@ -247,4 +247,197 @@ function THSE:DebugLog()
 	p("=== END FULLLOG ===")
 
 	THSE:ShowCopyWindow("Debug Log", table.concat(lines, "\n"))
+end
+
+-- ===== Honor Drift Analysis (/hsver drift) =====
+-- Compares API-reported weekly honor (snapshots) against individually tracked entries.
+-- Walks entries per week, shows a running total vs. API, and highlights gaps.
+function THSE:DebugDrift()
+	local lines = {}
+	local function p(s) table.insert(lines, s or "") end
+
+	local ver = GetAddOnMetadata("TurtleHonorSpyEnhanced", "Version") or "?"
+	p("THSE DRIFT ANALYSIS  v" .. ver .. "  " .. date("%Y-%m-%d %H:%M:%S"))
+	p("")
+
+	local hs = THSE.GetDB()
+	if not hs or not hs.honorHistory then
+		p("ERROR: No honor history in DB.")
+		THSE:ShowCopyWindow("Honor Drift", table.concat(lines, "\n"))
+		return
+	end
+
+	-- Wednesday reset calc (same as overlay.lua)
+	local FIRST_WED_UTC = 518400
+	local WEEK_SECS     = 604800
+	local now = time()
+	local weeksSince = math.floor((now - FIRST_WED_UTC) / WEEK_SECS)
+	local thisResetT = FIRST_WED_UTC + weeksSince * WEEK_SECS
+
+	-- Current API values
+	local apiThisWeek = 0
+	if GetPVPThisWeekStats then
+		local _, h = GetPVPThisWeekStats()
+		apiThisWeek = h or 0
+	end
+	local apiLastWeek = 0
+	if GetPVPLastWeekStats then
+		local _, _, h = GetPVPLastWeekStats()
+		apiLastWeek = h or 0
+	end
+
+	p("=== Live API ===")
+	p(string.format("GetPVPThisWeekStats honor: %d", apiThisWeek))
+	p(string.format("GetPVPLastWeekStats honor: %d", apiLastWeek))
+	p("")
+
+	-- Stored weekly snapshots
+	p("=== Stored Weekly API Snapshots (weekApiHonor) ===")
+	if hs.weekApiHonor then
+		local keys = {}
+		for k in pairs(hs.weekApiHonor) do table.insert(keys, k) end
+		table.sort(keys)
+		for _, k in ipairs(keys) do
+			local resetT = tonumber(k) or 0
+			local label = date("%Y-%m-%d %H:%M", resetT)
+			p(string.format("  reset %s  =>  %d honor", label, hs.weekApiHonor[k]))
+		end
+		if table.getn(keys) == 0 then p("  (none)") end
+	else
+		p("  (table not created yet)")
+	end
+	p("")
+
+	-- Group entries by week, newest first
+	local weekBuckets = {}  -- resetT => { entries (oldest first) }
+	local hist = hs.honorHistory
+	for i = table.getn(hist), 1, -1 do  -- iterate oldest→newest
+		local e = hist[i]
+		local eWeeksSince = math.floor((e.t - FIRST_WED_UTC) / WEEK_SECS)
+		local eResetT = FIRST_WED_UTC + eWeeksSince * WEEK_SECS
+		local key = eResetT
+		if not weekBuckets[key] then weekBuckets[key] = {} end
+		table.insert(weekBuckets[key], e)
+	end
+
+	-- Sort week keys newest first
+	local weekKeys = {}
+	for k in pairs(weekBuckets) do table.insert(weekKeys, k) end
+	table.sort(weekKeys, function(a, b) return a > b end)
+
+	for _, resetT in ipairs(weekKeys) do
+		local entries = weekBuckets[resetT]
+		local weeksAgo = math.floor((thisResetT - resetT) / WEEK_SECS)
+		local weekLabel = date("%d %b", resetT) .. " - " .. date("%d %b", resetT + 6 * 86400)
+		if weeksAgo == 0 then weekLabel = "This Week (" .. weekLabel .. ")" end
+		if weeksAgo == 1 then weekLabel = "Last Week (" .. weekLabel .. ")" end
+
+		-- API reference for this week
+		local apiRef = nil
+		if weeksAgo == 0 then
+			apiRef = apiThisWeek
+		elseif weeksAgo == 1 and apiLastWeek > 0 then
+			apiRef = apiLastWeek
+		end
+		local snapKey = tostring(resetT)
+		local snapVal = hs.weekApiHonor and hs.weekApiHonor[snapKey]
+		if snapVal and (not apiRef or snapVal > apiRef) then
+			apiRef = snapVal
+		end
+
+		p("=== " .. weekLabel .. " ===")
+		if apiRef then
+			p(string.format("API/Snapshot honor: %d", apiRef))
+		else
+			p("API/Snapshot honor: (none)")
+		end
+
+		-- Walk entries chronologically, show running total and per-entry detail
+		local runTotal = 0
+		local nKills, nTurnin, nAward, nBGResult, nTick, nOther = 0, 0, 0, 0, 0, 0
+		local hKills, hTurnin, hAward = 0, 0, 0
+		local prevApiSnap = nil  -- last tick's API value for delta comparison
+		local driftEvents = {}   -- timestamps where drift was detected
+
+		p(string.format("%-19s  %-10s  %+7s  %7s  %s", "time", "type", "amount", "running", "note"))
+		p(string.rep("-", 80))
+
+		for _, e in ipairs(entries) do
+			if e.type == "tick" then
+				nTick = nTick + 1
+				-- Tick entries carry API state; compare against running tracked total
+				local tickHonor = e.tickHaHq or 0
+				local note = string.format("api_honor=%.0f  hk=%.0f", tickHonor, e.tickHk or 0)
+				if tickHonor > 0 and runTotal > 0 then
+					local gap = tickHonor - runTotal
+					if gap > 1 then
+						note = note .. string.format("  ** DRIFT +%d (api ahead)", gap)
+						table.insert(driftEvents, { t = e.t, gap = gap, apiH = tickHonor, tracked = runTotal })
+					elseif gap < -1 then
+						note = note .. string.format("  ** DRIFT %d (tracked ahead)", gap)
+						table.insert(driftEvents, { t = e.t, gap = gap, apiH = tickHonor, tracked = runTotal })
+					end
+				end
+				prevApiSnap = tickHonor
+				p(string.format("%-19s  %-10s  %+7s  %7s  %s",
+					date("%Y-%m-%d %H:%M:%S", e.t), "tick", "-", tostring(runTotal), note))
+			elseif e.type == "bgresult" or e.type == "bgexit" then
+				nBGResult = nBGResult + 1
+				p(string.format("%-19s  %-10s  %+7s  %7s  %s",
+					date("%Y-%m-%d %H:%M:%S", e.t), e.type, "-", tostring(runTotal),
+					(e.result or "") .. " " .. (e.zone or "")))
+			else
+				local amt = e.amount or 0
+				runTotal = runTotal + amt
+				local note = e.zone or ""
+				if e.type == "kill" then
+					nKills = nKills + 1; hKills = hKills + amt
+					note = note .. " " .. (e.victim or "")
+				elseif e.type == "turnin" then
+					nTurnin = nTurnin + 1; hTurnin = hTurnin + amt
+					note = note .. " " .. (e.questName or "")
+				elseif e.type == "award" then
+					nAward = nAward + 1; hAward = hAward + amt
+				else
+					nOther = nOther + 1
+				end
+				p(string.format("%-19s  %-10s  %+7d  %7d  %s",
+					date("%Y-%m-%d %H:%M:%S", e.t), e.type or "?", amt, runTotal, note))
+			end
+		end
+
+		p("")
+		p("--- Summary ---")
+		p(string.format("Tracked total: %d", runTotal))
+		p(string.format("  Kills:    %3d entries  %+6d honor", nKills, hKills))
+		p(string.format("  Turn-ins: %3d entries  %+6d honor", nTurnin, hTurnin))
+		p(string.format("  Awards:   %3d entries  %+6d honor", nAward, hAward))
+		p(string.format("  Ticks:    %3d  |  BG events: %3d  |  Other: %3d", nTick, nBGResult, nOther))
+		if apiRef then
+			local finalDrift = apiRef - runTotal
+			p(string.format("API honor:     %d", apiRef))
+			if finalDrift > 0 then
+				p(string.format("DRIFT:         +%d honor UNTRACKED (%.1f%%)", finalDrift, finalDrift * 100 / apiRef))
+			elseif finalDrift < 0 then
+				p(string.format("DRIFT:         %d honor OVER-TRACKED (%.1f%%)", finalDrift, finalDrift * 100 / apiRef))
+			else
+				p("DRIFT:         0 (perfect match)")
+			end
+		else
+			p("API honor:     (unavailable for comparison)")
+		end
+
+		if table.getn(driftEvents) > 0 then
+			p("")
+			p("--- Drift Events (tick checkpoints where gap changed) ---")
+			for _, d in ipairs(driftEvents) do
+				p(string.format("  %s  gap=%+d  api=%.0f  tracked=%d",
+					date("%Y-%m-%d %H:%M:%S", d.t), d.gap, d.apiH, d.tracked))
+			end
+		end
+		p("")
+	end
+
+	p("=== END DRIFT ANALYSIS ===")
+	THSE:ShowCopyWindow("Honor Drift Analysis", table.concat(lines, "\n"))
 end
