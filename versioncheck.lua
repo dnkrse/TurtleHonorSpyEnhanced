@@ -7,10 +7,11 @@ local MY_VERSION = GetAddOnMetadata(ADDON_NAME, "Version") or "0.0.0"
 local MSG_PREFIX = "THSE"
 local updateNotified = false
 
-THSE_VersionDebug = false
+THSE.version = MY_VERSION
+THSE.versionDebug = false
 
 local function VerDebug(direction, channel, who, payload)
-	if not THSE_VersionDebug then return end
+	if not THSE.versionDebug then return end
 	local tag = direction == "OUT"
 		and "|cff44ff44[THSE SEND]|r"
 		or  "|cff44ddff[THSE RECV]|r"
@@ -18,8 +19,8 @@ local function VerDebug(direction, channel, who, payload)
 		tag .. " " .. channel .. " " .. (who or "?") .. " => " .. tostring(payload))
 end
 
--- Global table: THSE_AddonUsers[name] = { ver = "x.y.z", seen = <timestamp> }
-THSE_AddonUsers = {}
+-- Global table: THSE.addonUsers[name] = { ver = "x.y.z", seen = <timestamp> }
+THSE.addonUsers = {}
 local EXPIRY_SECONDS = 7 * 24 * 60 * 60
 
 local function IsInBattleground()
@@ -30,14 +31,14 @@ local function IsInBattleground()
 end
 
 local function LoadAddonUsers()
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local hs = THSE.GetDB()
 	if not hs then return end
 	if not hs.addonUsers then hs.addonUsers = {} end
 	local now = time()
 	for name, entry in pairs(hs.addonUsers) do
 		if type(entry) == "table" and entry.seen and (now - entry.seen) < EXPIRY_SECONDS then
 			if entry.ver == "pre-1.2" then entry.ver = "pre-1.2.2" end
-			THSE_AddonUsers[name] = entry
+			THSE.addonUsers[name] = entry
 		else
 			hs.addonUsers[name] = nil
 		end
@@ -45,11 +46,11 @@ local function LoadAddonUsers()
 end
 
 local function SaveAddonUser(name, version)
-	THSE_AddonUsers[name] = { ver = version, seen = time() }
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	THSE.addonUsers[name] = { ver = version, seen = time() }
+	local hs = THSE.GetDB()
 	if hs then
 		if not hs.addonUsers then hs.addonUsers = {} end
-		hs.addonUsers[name] = THSE_AddonUsers[name]
+		hs.addonUsers[name] = THSE.addonUsers[name]
 	end
 end
 
@@ -78,24 +79,34 @@ local function CompareVersions(a, b)
 	return 0
 end
 
-local function BroadcastVersion()
-	local me = UnitName("player")
-	if me then SaveAddonUser(me, MY_VERSION) end
-	local msg = MY_VERSION
+-- Send a message to all available addon channels; returns list of channel names used.
+local function SendToChannels(msg)
+	local channels = {}
 	if IsInGuild() then
 		SendAddonMessage(MSG_PREFIX, msg, "GUILD")
-		VerDebug("OUT", "GUILD", me, msg)
+		table.insert(channels, "GUILD")
 	end
 	if IsInBattleground() then
 		SendAddonMessage(MSG_PREFIX, msg, "BATTLEGROUND")
 		SendAddonMessage(MSG_PREFIX, msg, "RAID")
-		VerDebug("OUT", "BATTLEGROUND", me, msg)
+		table.insert(channels, "BATTLEGROUND")
+		table.insert(channels, "RAID")
 	elseif GetNumRaidMembers() > 0 then
 		SendAddonMessage(MSG_PREFIX, msg, "RAID")
-		VerDebug("OUT", "RAID", me, msg)
+		table.insert(channels, "RAID")
 	elseif GetNumPartyMembers() > 0 then
 		SendAddonMessage(MSG_PREFIX, msg, "PARTY")
-		VerDebug("OUT", "PARTY", me, msg)
+		table.insert(channels, "PARTY")
+	end
+	return channels
+end
+
+local function BroadcastVersion()
+	local me = UnitName("player")
+	if me then SaveAddonUser(me, MY_VERSION) end
+	local sent = SendToChannels(MY_VERSION)
+	for _, ch in ipairs(sent) do
+		VerDebug("OUT", ch, me, MY_VERSION)
 	end
 end
 
@@ -162,16 +173,7 @@ frame:SetScript("OnUpdate", function()
 			needsBroadcast = false
 			BroadcastVersion()
 			timeSinceLastBroadcast = 0
-			local reqMsg = "REQ:1"
-			if IsInGuild() then SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD") end
-			if IsInBattleground() then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "BATTLEGROUND")
-				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
-			elseif GetNumRaidMembers() > 0 then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
-			elseif GetNumPartyMembers() > 0 then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
-			end
+			SendToChannels("REQ:1")
 		end
 	else
 		timeSinceLastBroadcast = timeSinceLastBroadcast + arg1
@@ -185,216 +187,69 @@ frame:SetScript("OnUpdate", function()
 		if timeSinceLastBroadcast >= rebroadcastRate then
 			timeSinceLastBroadcast = 0
 			BroadcastVersion()
-			local reqMsg = "REQ:1"
-			if IsInGuild() then SendAddonMessage(MSG_PREFIX, reqMsg, "GUILD") end
-			if IsInBattleground() then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "BATTLEGROUND")
-				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
-			elseif GetNumRaidMembers() > 0 then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "RAID")
-			elseif GetNumPartyMembers() > 0 then
-				SendAddonMessage(MSG_PREFIX, reqMsg, "PARTY")
-			end
+			SendToChannels("REQ:1")
 		end
 	end
 end)
 
--- ===== /hsver slash command =====
-SLASH_HSVER1 = "/hsver"
-SlashCmdList["HSVER"] = function(msg)
-	msg = string.lower(msg or "")
+-- ===== Public methods for command routing (commands.lua) =====
 
-	if string.sub(msg, 1, 8) == "test msg" then
-		local rest = string.sub(msg, 10)
-		local fakeVer, fakeName
-		local _, _, v, n = string.find(rest, "^(%S+)%s+(%S+)")
-		if v then fakeVer, fakeName = v, n
-		else fakeVer = rest ~= "" and rest or "9.9.9" end
-		fakeName = fakeName or "TestPlayer"
-		updateNotified = false
+function THSE:VersionToggleDebug()
+	THSE.versionDebug = not THSE.versionDebug
+	local hs = THSE.GetDB()
+	if hs then hs.versionDebug = THSE.versionDebug end
+	DEFAULT_CHAT_FRAME:AddMessage(
+		"|cffFFD100TurtleHonorSpyEnhanced:|r Version comm debug " ..
+		(THSE.versionDebug and "|cff00ff00ON|r" or "|cffff4444OFF|r"),
+		1, 0.82, 0)
+end
+
+function THSE:VersionSendRequest()
+	local channels = SendToChannels("REQ:1")
+	if table.getn(channels) > 0 then
 		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100THSE Debug:|r Simulating receive: sender=" ..
-			fakeName .. " version=" .. fakeVer, 0.6, 0.8, 1)
-		SaveAddonUser(fakeName, fakeVer)
-		OnRemoteVersion(fakeVer)
-		return
-	end
-
-	if msg == "test" then
-		updateNotified = false
-		OnRemoteVersion("9.9.9")
-
-	elseif msg == "reset" then
-		updateNotified = false
-		local overlay = getglobal("HonorSpyOverlayFrame")
-		if overlay and overlay.versionFooter then
-			overlay.versionFooter:SetTextColor(0.35, 0.35, 0.35)
-			overlay.versionFooter:SetText("v" .. MY_VERSION)
-		end
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r Version display reset.",
-			1, 0.82, 0)
-
-	elseif msg == "debug" then
-		THSE_VersionDebug = not THSE_VersionDebug
-		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
-		if hs then hs.versionDebug = THSE_VersionDebug end
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r Version comm debug " ..
-			(THSE_VersionDebug and "|cff00ff00ON|r" or "|cffff4444OFF|r"),
-			1, 0.82, 0)
-
-	elseif msg == "users bg" then
-		local numRaid = GetNumRaidMembers()
-		if numRaid == 0 then
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"|cffFFD100TurtleHonorSpyEnhanced:|r Not in a raid/battleground.",
-				1, 0.82, 0)
-			return
-		end
-		local uptodate, outdated, missing = {}, {}, {}
-		for i = 1, numRaid do
-			local name = GetRaidRosterInfo(i)
-			if name and name ~= UnitName("player") then
-				local entry = THSE_AddonUsers and THSE_AddonUsers[name]
-				if entry and type(entry) == "table" and entry.ver then
-					if entry.ver ~= MY_VERSION then
-						table.insert(outdated, { name = name, ver = entry.ver })
-					else
-						table.insert(uptodate, name)
-					end
-				else
-					table.insert(missing, name)
-				end
-			end
-		end
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r BG version check (you: v" ..
-			MY_VERSION .. ")", 1, 0.82, 0)
-		if table.getn(uptodate) > 0 then
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"  |cff88cc88Up to date (" .. table.getn(uptodate) .. "):|r",
-				0.7, 0.7, 0.7)
-			for _, name in ipairs(uptodate) do
-				DEFAULT_CHAT_FRAME:AddMessage("    |cff88cc88" .. name .. "|r",
-					0.7, 0.7, 0.7)
-			end
-		end
-		if table.getn(outdated) > 0 then
-			DEFAULT_CHAT_FRAME:AddMessage("  Outdated:", 0.87, 0.73, 0.27)
-			for _, p in ipairs(outdated) do
-				DEFAULT_CHAT_FRAME:AddMessage(
-					"    |cffffffff" .. p.name .. "|r — |cffffaa44v" .. p.ver .. "|r",
-					0.7, 0.7, 0.7)
-			end
-		end
-		if table.getn(missing) > 0 then
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"  No addon: |cffffffff" .. table.concat(missing, ", ") .. "|r",
-				0.87, 0.73, 0.27)
-		end
-
-	elseif msg == "users req" then
-		local channels = {}
-		if IsInGuild() then
-			SendAddonMessage(MSG_PREFIX, "REQ:1", "GUILD")
-			table.insert(channels, "GUILD")
-		end
-		if IsInBattleground() then
-			SendAddonMessage(MSG_PREFIX, "REQ:1", "BATTLEGROUND")
-			SendAddonMessage(MSG_PREFIX, "REQ:1", "RAID")
-			table.insert(channels, "BATTLEGROUND+RAID")
-		elseif GetNumRaidMembers() > 0 then
-			SendAddonMessage(MSG_PREFIX, "REQ:1", "RAID")
-			table.insert(channels, "RAID")
-		elseif GetNumPartyMembers() > 0 then
-			SendAddonMessage(MSG_PREFIX, "REQ:1", "PARTY")
-			table.insert(channels, "PARTY")
-		end
-		if table.getn(channels) > 0 then
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"|cffFFD100TurtleHonorSpyEnhanced:|r Version request sent to: " ..
-				table.concat(channels, ", "), 1, 0.82, 0)
-		else
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"|cffFFD100TurtleHonorSpyEnhanced:|r Not in guild, party, or raid.",
-				1, 0.82, 0)
-		end
-
-	elseif msg == "users reset" then
-		THSE_AddonUsers = {}
-		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
-		if hs then hs.addonUsers = {} end
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r Addon users list cleared.",
-			1, 0.82, 0)
-
-	elseif msg == "diag" then
-		if HonorSpy_RunDiagnostics then
-			HonorSpy_RunDiagnostics()
-		end
-
-	elseif msg == "pvpdebug" then
-		if HonorSpy_ToggleDebugPvp then
-			HonorSpy_ToggleDebugPvp()
-		end
-
-	elseif msg == "users all" or msg == "users" then
-		local count = 0
-		if THSE_AddonUsers then
-			for name, entry in pairs(THSE_AddonUsers) do
-				local ver = type(entry) == "table" and entry.ver or tostring(entry)
-				local seenAgo = ""
-				if type(entry) == "table" and entry.seen then
-					local diff = time() - entry.seen
-					if diff < 3600 then
-						seenAgo = string.format(" (%dm ago)", math.floor(diff / 60))
-					elseif diff < 86400 then
-						seenAgo = string.format(" (%.1fh ago)", diff / 3600)
-					else
-						seenAgo = string.format(" (%.1fd ago)", diff / 86400)
-					end
-				end
-				local color = ver == "pre-1.2.2" and "ffaa44" or "55ccff"
-				DEFAULT_CHAT_FRAME:AddMessage(
-					"  |cffffffff" .. name .. "|r — |cff" .. color .. ver .. "|r" .. seenAgo,
-					0.7, 0.7, 0.7)
-				count = count + 1
-			end
-		end
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r " .. count .. " known addon user(s).",
-			1, 0.82, 0)
-
+			"|cffFFD100TurtleHonorSpyEnhanced:|r Version request sent to: " ..
+			table.concat(channels, ", "), 1, 0.82, 0)
 	else
 		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cffFFD100TurtleHonorSpyEnhanced:|r v" .. MY_VERSION, 1, 0.82, 0)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver test — simulate update available", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver test msg [ver] [name] — simulate receive from a fake player",
-			0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver reset — revert update display", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver debug — toggle version comm debug logging", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver pvpdebug — toggle PvP event debug output", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver diag — dump DB state and addon status", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver users all — list known addon users and versions", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver users reset — clear the addon users list", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver users bg — show raid members not on current version", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver users req — send version request to guild/party/raid", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver pvp [rank|week|last|life|sess] — dump PvP API values", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver watch — watch rank progress / honor live (1s poll)", 0.7, 0.7, 0.7)
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"  /hsver watch stop — stop the watcher", 0.7, 0.7, 0.7)
+			"|cffFFD100TurtleHonorSpyEnhanced:|r Not in guild, party, or raid.",
+			1, 0.82, 0)
 	end
+end
+
+function THSE:VersionResetUsers()
+	THSE.addonUsers = {}
+	local hs = THSE.GetDB()
+	if hs then hs.addonUsers = {} end
+	DEFAULT_CHAT_FRAME:AddMessage(
+		"|cffFFD100TurtleHonorSpyEnhanced:|r Addon users list cleared.",
+		1, 0.82, 0)
+end
+
+function THSE:VersionListUsers()
+	local count = 0
+	if THSE.addonUsers then
+		for name, entry in pairs(THSE.addonUsers) do
+			local ver = type(entry) == "table" and entry.ver or tostring(entry)
+			local seenAgo = ""
+			if type(entry) == "table" and entry.seen then
+				local diff = time() - entry.seen
+				if diff < 3600 then
+					seenAgo = string.format(" (%dm ago)", math.floor(diff / 60))
+				elseif diff < 86400 then
+					seenAgo = string.format(" (%.1fh ago)", diff / 3600)
+				else
+					seenAgo = string.format(" (%.1fd ago)", diff / 86400)
+				end
+			end
+			local color = ver == "pre-1.2.2" and "ffaa44" or "55ccff"
+			DEFAULT_CHAT_FRAME:AddMessage(
+				"  |cffffffff" .. name .. "|r — |cff" .. color .. ver .. "|r" .. seenAgo,
+				0.7, 0.7, 0.7)
+			count = count + 1
+		end
+	end
+	DEFAULT_CHAT_FRAME:AddMessage(
+		"|cffFFD100TurtleHonorSpyEnhanced:|r " .. count .. " known addon user(s).",
+		1, 0.82, 0)
 end

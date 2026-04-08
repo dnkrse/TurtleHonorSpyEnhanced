@@ -7,6 +7,8 @@ local ROW_H = 14
 local DATESEP_H = 18  -- day separator row height
 local WEEKSEP_H = 22  -- week separator (highest hierarchy)
 local GROUP_GAP_SEC = 300
+local BG_FINISH_GRACE = 10   -- seconds: bonus awards arriving after bgresult still belong to same game
+local BG_SESSION_GAP = 7200  -- seconds: max gap between entries in one sealed BG game (2h covers long AV)
 local MAX_ENTRIES   = 20000
 local FONT = "Fonts\\FRIZQT__.TTF"
 local TIP_W = 220
@@ -20,52 +22,71 @@ local _IsBG = {
 	["Blood Ring"]    = true,
 }
 
-local _ZONE_ABBR = {
-	["Warsong Gulch"] = "WSG",
-	["Arathi Basin"]  = "AB",
-	["Alterac Valley"]= "AV",
-	["Thorn Gorge"]   = "Thorn",
-	["Blood Ring"]    = "Blood",
-}
+local _ZONE_ABBR    = THSE.ZONE_ABBR
+local _BG_MARK_ICON = THSE.BG_MARK_ICON
+local GetDailyBG    = THSE.GetDailyBG
 
 local function IsBGZone(zone)
 	return zone and _IsBG[zone] == true
 end
 
--- BG mark item icons (confirmed via /hsver bagtex in-game)
-local _BG_MARK_ICON = {
-	["Warsong Gulch"] = "Interface\\Icons\\INV_Misc_Rune_07",
-	["Arathi Basin"]  = "Interface\\Icons\\INV_Jewelry_Amulet_07",
-	["Alterac Valley"]= "Interface\\Icons\\INV_Jewelry_Necklace_21",
-	["Thorn Gorge"]   = "Interface\\Icons\\INV_Jewelry_Talisman_04",
-	["Blood Ring"]    = "Interface\\Icons\\INV_Jewelry_Talisman_05",
+-- Reverse lookup: rank number → rank name (by faction)
+local _NUM_TO_RANK_ALLIANCE = {
+	[1]="Private", [2]="Corporal", [3]="Sergeant", [4]="Master Sergeant",
+	[5]="Sergeant Major", [6]="Knight", [7]="Knight-Lieutenant", [8]="Knight-Captain",
+	[9]="Knight-Champion", [10]="Lieutenant Commander", [11]="Commander",
+	[12]="Marshal", [13]="Field Marshal", [14]="Grand Marshal",
+}
+local _NUM_TO_RANK_HORDE = {
+	[1]="Scout", [2]="Grunt", [3]="Sergeant", [4]="Senior Sergeant",
+	[5]="First Sergeant", [6]="Stone Guard", [7]="Blood Guard", [8]="Legionnaire",
+	[9]="Centurion", [10]="Champion", [11]="Lieutenant General",
+	[12]="General", [13]="Warlord", [14]="High Warlord",
 }
 
--- Daily BG rotation (5-day cycle).  Anchor: 2026-03-22 = index 0 (WSG).
-local _DAILY_BG_CYCLE = {
-	[0] = "Warsong Gulch",
-	[1] = "Arathi Basin",
-	[2] = "Blood Ring",
-	[3] = nil,  -- empty slot (was Sunnyglade Valley; will become Thorn Gorge)
-	[4] = "Alterac Valley",
-}
-local _DAILY_BG_ANCHOR = time({ year=2026, month=3, day=22, hour=0 })  -- known WSG day
+-- Look up a player's rank name from the BG scoreboard (returns nil outside BGs)
+-- Uses a persistent cache refreshed on UPDATE_BATTLEFIELD_SCORE events.
+local _bgScoreRank = {}  -- name -> rankName
 
-local function GetDailyBG(timestamp)
-	local d = date("*t", timestamp)
-	local dayT = time({ year=d.year, month=d.month, day=d.day, hour=0 })
-	local anchorD = date("*t", _DAILY_BG_ANCHOR)
-	local anchorT = time({ year=anchorD.year, month=anchorD.month, day=anchorD.day, hour=0 })
-	local diff = math.floor((dayT - anchorT) / 86400 + 0.5)
-	local idx = math.mod(diff, 5)
-	if idx < 0 then idx = idx + 5 end
-	return _DAILY_BG_CYCLE[idx]
+local function RefreshBGScoreCache()
+	if type(GetNumBattlefieldScores) ~= "function" then return end
+	local n = GetNumBattlefieldScores()
+	for i = 1, n do
+		local name, _, _, _, _, faction, rank = GetBattlefieldScore(i)
+		if name and type(rank) == "number" and rank > 0 then
+			local tbl = (faction == 1) and _NUM_TO_RANK_ALLIANCE or _NUM_TO_RANK_HORDE
+			local rankName = tbl[rank]
+			-- Extended ranks (15+): use GetPVPRankInfo API
+			if not rankName and GetPVPRankInfo then
+				rankName = GetPVPRankInfo(rank)
+			end
+			if rankName then
+				_bgScoreRank[name] = rankName
+				local short = string.gsub(name, "%-.*", "")
+				if short ~= name then _bgScoreRank[short] = rankName end
+			end
+		end
+	end
+end
+
+local function ScoreboardRank(playerName)
+	if not playerName then return nil end
+	local short = string.gsub(playerName, "%-.*", "")
+	if not (_bgScoreRank[playerName] or _bgScoreRank[short]) then
+		-- Cache miss — do an immediate synchronous refresh in case data is available
+		RefreshBGScoreCache()
+	end
+	if not (_bgScoreRank[playerName] or _bgScoreRank[short]) and RequestBattlefieldScoreData then
+		-- Still nil — request fresh data from server for next lookup
+		RequestBattlefieldScoreData()
+	end
+	return _bgScoreRank[playerName] or _bgScoreRank[short]
 end
 
 -- Quests that turn in marks from all three main BGs simultaneously
 local _CONCERTED_QUEST = {
-	["concerted efforts"] = true,  -- Alliance
-	["for great honor"]   = true,  -- Horde
+	["Concerted Efforts"] = true,  -- Alliance
+	["For Great Honor"]   = true,  -- Horde
 }
 
 -- ===== Rank lookup =====
@@ -104,6 +125,13 @@ local function FmtTime(t)
 	return date("%H:%M", t)
 end
 
+local function FmtDuration(sec)
+	local h = math.floor(sec / 3600)
+	local m = math.floor(math.mod(sec, 3600) / 60)
+	if h > 0 then return h .. "h " .. m .. "m" end
+	return m .. "m"
+end
+
 local function FmtDate(t)
 	return date("%a %d %b", t)
 end
@@ -124,8 +152,32 @@ local function FmtDateLabel(dayStr)
 end
 
 -- ===== DB accessor =====
-local function GetDB()
-	return HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+local GetDB = THSE.GetDB
+
+-- ===== Shared helpers =====
+local function TrimHistory(hs)
+	while table.getn(hs.honorHistory) > MAX_ENTRIES do
+		table.remove(hs.honorHistory)
+	end
+end
+
+-- Append "Rank Progress" lines with Honor-per-1% breakdown to a tooltip.
+-- gain: rank progress delta (0-1 scale); total/hKills/hOther: honor amounts.
+local function AppendRankGainTip(L, gain, total, hKills, hOther)
+	if gain < 0.00005 then return end
+	table.insert(L, { "", nil })
+	table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
+	table.insert(L, { "Progress", "+" .. string.format("%.2f", gain * 100) .. "%", 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
+	local pctPoints = gain * 100
+	if total > 0 and pctPoints > 0 then
+		table.insert(L, { "Honor per 1%", FmtHonor(math.floor(total / pctPoints)), 0.7, 0.7, 0.7, 0.867, 0.733, 0.267, true })
+		if hKills > 0 then
+			table.insert(L, { "  HK per 1%", FmtHonor(math.floor(hKills / pctPoints)), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267, true })
+		end
+		if hOther > 0 then
+			table.insert(L, { "  Bonus+Quest per 1%", FmtHonor(math.floor(hOther / pctPoints)), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267, true })
+		end
+	end
 end
 
 -- ===== QuestToBG: substring-match quest name to BG zone =====
@@ -151,85 +203,141 @@ local function BuildGroups(history)
 	-- already-sealed group; entries with t <= pendingResult.t belong to an
 	-- earlier game (force a new group).
 	local pendingResult = nil  -- { zone=..., result=..., t=... }
+	-- pendingTicks: tick entries that arrived before any group existed (cur==nil).
+	-- Flushed (prepended) to the next group that is created so they appear
+	-- in the most recent group, newest-first.
+	local pendingTicks = {}
 
 	for i = 1, table.getn(history) do
 		local e = history[i]
 
 		if e.type == "bgresult" then
-			-- Only apply to the current group if it is not yet sealed AND the
-			-- bgresult is not older than the group's entries.
-			-- Since we iterate newest-first, cur.lastT is the oldest timestamp
-			-- in cur so far.  If e.t < cur.lastT the bgresult belongs to a
-			-- previous game: seal cur (to block old entries from merging) and
-			-- defer for the older group.
-			if cur and IsBGZone(cur.zone) and cur.zone == e.zone and not cur.sealed then
-				if e.t >= cur.lastT then
-					-- bgresult is within the current group's timespan → apply it
-					cur.result    = e.result
-					cur.sealed    = true
-					cur.sealedAtT = e.t
+			if cur and IsBGZone(cur.zone) and cur.zone == e.zone then
+				if not cur.sealed then
+					-- Unsealed group: apply grace check
+					if (cur.lastT - e.t) <= BG_FINISH_GRACE then
+						cur.result    = e.result
+						cur.sealed    = true
+						cur.sealedAtT = e.t
+					else
+						cur.sealed    = true
+						cur.sealedAtT = cur.lastT
+						pendingResult = { zone = e.zone, result = e.result, t = e.t }
+					end
+				elseif not cur.result then
+					-- Sealed by bgexit but no result yet → attach the Win/Loss.
+					-- Don't create a new boundary — remaining entries belong to
+					-- the same game and should merge via BG_SESSION_GAP fallback.
+					cur.result = e.result
 				else
-					-- bgresult is from a previous game: seal cur without a result
-					-- and defer so the older group gets it
-					cur.sealed    = true
-					cur.sealedAtT = cur.lastT
+					-- Already has a result → belongs to an older game
 					pendingResult = { zone = e.zone, result = e.result, t = e.t }
 				end
 			else
-				-- Defer: the matching group appears later in the loop (older entries)
 				pendingResult = { zone = e.zone, result = e.result, t = e.t }
 			end
-		else
-			local sameGroup = false
-			if cur then
-				local sameZone = (e.zone == cur.zone)
-				local withinGap = (cur.lastT - e.t) <= GROUP_GAP_SEC
-				if IsBGZone(e.zone) then
-					if not cur.sealed then
-						sameGroup = sameZone
+		elseif e.type == "bgexit" then
+			-- bgexit seals the current BG group (game boundary) but carries
+			-- no result — the bgresult that follows will supply it.
+			-- Only seal if the bgexit belongs to THIS game session (timestamp
+			-- within grace of the group's entries). If older, it's from a
+			-- previous game — defer as boundary marker.
+			if cur and IsBGZone(cur.zone) and cur.zone == e.zone then
+				if not cur.sealed then
+					if (cur.startT - e.t) <= BG_FINISH_GRACE then
+						-- bgexit is close to group entries → same game, seal it
+						cur.sealed    = true
+						cur.sealedAtT = e.t
+						table.insert(cur.entries, e)
 					else
-						-- Sealed group: this entry still belongs to the same game
-						-- as long as no intervening bgresult (pendingResult) marks
-						-- the start of an older game boundary.
-						-- pendingResult.t is the timestamp of the *previous* game's
-						-- end event; entries newer than that are still in cur's game.
-						local boundary = pendingResult and pendingResult.t or 0
-						sameGroup = sameZone and (e.t > boundary)
+						-- bgexit is from previous game → seal cur (no result)
+						-- and set boundary so old entries start a new group
+						cur.sealed    = true
+						cur.sealedAtT = cur.lastT
+						pendingResult = { zone = e.zone, result = nil, t = e.t }
 					end
 				else
-					sameGroup = sameZone and withinGap
+					-- Already sealed → boundary marker for older entries
+					pendingResult = pendingResult or { zone = e.zone, result = nil, t = e.t }
 				end
 			end
-
-			if sameGroup then
-				table.insert(cur.entries, e)
-				cur.total = cur.total + (e.amount or 0)
-				cur.lastT = e.t
-				if e.type == "turnin" or e.type == "award" then
-					cur.isTurnin = true
+			-- If cur is nil or different zone, skip — bgresult handles boundaries
+		else
+			-- Tick entries are metadata — always attach to current group,
+			-- never create new groups or affect grouping boundaries.
+			if e.type == "tick" then
+				if cur then
+					table.insert(cur.entries, e)
+				else
+					-- No group yet: buffer until the next real group is created.
+					table.insert(pendingTicks, e)
 				end
+				-- Don't update cur.lastT or cur.total; tick is transparent.
 			else
-				cur = {
-					zone     = e.zone,
-					isBG     = IsBGZone(e.zone),
-					isTurnin = (e.type == "turnin" or e.type == "award"),
-					total    = e.amount or 0,
-					result   = nil,
-					startT   = e.t,
-					lastT    = e.t,
-					gKey     = (e.zone or "?") .. ":" .. tostring(e.t),
-					entries  = { e },
-				}
-				-- Apply deferred bgresult if it matches this new group's zone
-				if pendingResult and cur.isBG and pendingResult.zone == cur.zone then
-					cur.result    = pendingResult.result
-					cur.sealed    = true
-					cur.sealedAtT = pendingResult.t
-					pendingResult = nil
+			local sameGroup = false
+				if cur then
+					local sameZone = (e.zone == cur.zone)
+					local withinGap = (cur.lastT - e.t) <= GROUP_GAP_SEC
+					if IsBGZone(e.zone) then
+						if not cur.sealed then
+							sameGroup = sameZone and (cur.lastT - e.t) <= BG_SESSION_GAP
+						else
+							-- Sealed BG group: use explicit boundary if available,
+							-- otherwise fall back to time gap between entries.
+							if pendingResult then
+								sameGroup = sameZone and (e.t > pendingResult.t)
+							else
+								sameGroup = sameZone and (cur.lastT - e.t) <= BG_SESSION_GAP
+							end
+						end
+					else
+						sameGroup = sameZone and withinGap
+					end
 				end
-				table.insert(groups, cur)
-			end
+
+				if sameGroup then
+					table.insert(cur.entries, e)
+					cur.total = cur.total + (e.amount or 0)
+					cur.lastT = e.t
+					if e.type == "turnin" or e.type == "award" then
+						cur.isTurnin = true
+					end
+				else
+					cur = {
+						zone     = e.zone,
+						isBG     = IsBGZone(e.zone),
+						isTurnin = (e.type == "turnin" or e.type == "award"),
+						total    = e.amount or 0,
+						result   = nil,
+						startT   = e.t,
+						lastT    = e.t,
+						entries  = { e },
+					}
+					-- Flush any ticks that arrived before this group existed.
+					-- Insert newest-first: iterate pendingTicks in reverse so the
+					-- chronologically newest tick ends up at cur.entries[1].
+					if table.getn(pendingTicks) > 0 then
+						for pi = table.getn(pendingTicks), 1, -1 do
+							table.insert(cur.entries, 1, pendingTicks[pi])
+						end
+						pendingTicks = {}
+					end
+					-- Apply deferred bgresult if it matches this new group's zone
+					if pendingResult and cur.isBG and pendingResult.zone == cur.zone then
+						cur.result    = pendingResult.result
+						cur.sealed    = true
+						cur.sealedAtT = pendingResult.t
+						pendingResult = nil
+					end
+					table.insert(groups, cur)
+				end
+			end -- tick vs normal entry
 		end
+	end
+
+	-- Stabilize gKey using lastT (oldest entry) so keys don't change when new entries arrive
+	for _, g in ipairs(groups) do
+		g.gKey = (g.zone or "?") .. ":" .. tostring(g.lastT)
 	end
 
 	return groups
@@ -340,7 +448,7 @@ local function BuildGroupTip(g)
 			local tstr = firstT ~= lastT
 				and (FmtTime(firstT) .. " - " .. FmtTime(lastT))
 				or FmtTime(firstT)
-			if span > 60 then tstr = tstr .. "  (" .. math.floor(span/60) .. "m)" end
+			if span > 60 then tstr = tstr .. "  (" .. FmtDuration(span) .. ")" end
 			table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
 		end
 		table.insert(L, { "", nil })
@@ -368,18 +476,12 @@ local function BuildGroupTip(g)
 	end
 
 	-- Rank Progress (per group, chained to previous group)
-	local rankGain = g.chainedRankGain or 0
-	if rankGain > 0.00005 then
-		table.insert(L, { "", nil })
-		table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
-		local gainStr = "+" .. string.format("%.2f", rankGain * 100) .. "%"
-		table.insert(L, { "Progress", gainStr, 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
-	end
+	AppendRankGainTip(L, g.chainedRankGain or 0, g.total, hKills, hAward + hTurnin)
 
 	return tip
 end
 
-local function BuildWeekTip(label, weekGroups, wTop, wBot)
+local function BuildWeekTip(label, weekGroups, wTop, wBot, apiHonor)
 	local tip = { title = label, tr = 1.0, tg = 0.82, tb = 0.0, lines = {} }
 	local L = tip.lines
 
@@ -387,11 +489,14 @@ local function BuildWeekTip(label, weekGroups, wTop, wBot)
 	local nKills, nTurnin = 0, 0
 	local hKills, hBG, hTurnin, hBonus = 0, 0, 0, 0
 	local wFirstT, wLastT, wTotal = nil, nil, 0
+	local wActiveTime = 0  -- sum of per-group spans (active time only)
 
 	for _, g in ipairs(weekGroups) do
-		if not wFirstT or g.startT < wFirstT then wFirstT = g.startT end
-		if not wLastT  or g.lastT  > wLastT  then wLastT  = g.lastT  end
+		if not wFirstT or g.lastT  < wFirstT then wFirstT = g.lastT  end
+		if not wLastT  or g.startT > wLastT  then wLastT  = g.startT end
 		wTotal = wTotal + g.total
+		local gSpan = g.startT - g.lastT
+		if gSpan > 0 then wActiveTime = wActiveTime + gSpan end
 		if g.isBG then
 			nBGs = nBGs + 1
 			if g.result == "win"  then nWins   = nWins   + 1 end
@@ -413,9 +518,8 @@ local function BuildWeekTip(label, weekGroups, wTop, wBot)
 	if wFirstT and wLastT then
 		local d1 = date("%d %b", wFirstT)
 		local d2 = date("%d %b", wLastT)
-		local span = wLastT - wFirstT
 		local tstr = d1 ~= d2 and (d1 .. " - " .. d2) or d1
-		if span > 60 then tstr = tstr .. "  (" .. math.floor(span / 3600) .. "h)" end
+		if wActiveTime > 60 then tstr = tstr .. "  (" .. FmtDuration(wActiveTime) .. ")" end
 		table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
 	end
 	table.insert(L, { "", nil })
@@ -446,38 +550,33 @@ local function BuildWeekTip(label, weekGroups, wTop, wBot)
 	if hKills>0 then nSrc=nSrc+1 end; if hBG>0 then nSrc=nSrc+1 end
 	if hTurnin>0 then nSrc=nSrc+1 end; if hBonus>0 then nSrc=nSrc+1 end
 	if nSrc > 1 then table.insert(L, { "--------------------", nil, 0.25, 0.25, 0.25 }) end
-	table.insert(L, { "Total", "+" .. FmtHonor(wTotal), 1.0, 0.82, 0.0, 0.867, 0.733, 0.267 })
-	if wFirstT and wLastT then
-		local span = wLastT - wFirstT
-		if span > 3600 then
-			local hph = math.floor(wTotal * 3600 / span)
-			table.insert(L, { "Honor/hr", FmtHonor(hph), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267 })
-		end
+	local displayTotal = wTotal
+	if apiHonor and apiHonor > displayTotal then displayTotal = apiHonor end
+	table.insert(L, { "Total", "+" .. FmtHonor(displayTotal), 1.0, 0.82, 0.0, 0.867, 0.733, 0.267 })
+	if displayTotal > wTotal then
+		table.insert(L, { "Tracked", "+" .. FmtHonor(wTotal), 0.45, 0.45, 0.45, 0.55, 0.55, 0.55, true })
+	end
+	if wActiveTime > 60 then
+		local hph = math.floor(displayTotal * 3600 / wActiveTime)
+		table.insert(L, { "Honor/hr", FmtHonor(hph), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267 })
 	end
 
 	-- Rank Progress section
 	if wTop and wBot then
 		local wGain = wTop - wBot
-		if math.abs(wGain) > 0.00005 then
+		if wGain > 0.00005 then
+			AppendRankGainTip(L, wGain, displayTotal, hKills, hBG + hTurnin + hBonus)
+		elseif wGain < -0.00005 then
 			table.insert(L, { "", nil })
 			table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
-			if wGain > 0 then
-				table.insert(L, { "Progress", "+" .. string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
-				local pctPoints = wGain * 100
-				if wTotal > 0 and pctPoints > 0 then
-					local honorPer1 = math.floor(wTotal / pctPoints)
-					table.insert(L, { "Honor per 1%", FmtHonor(honorPer1), 0.7, 0.7, 0.7, 0.867, 0.733, 0.267 })
-				end
-			else
-				table.insert(L, { "Net Change", string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
-			end
+			table.insert(L, { "Net Change", string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
 		end
 	end
 
 	return tip
 end
 
-local function BuildDayTip(dayStr, dayGroups, decayPct)
+local function BuildDayTip(dayStr, dayGroups, decayPct, isToday)
 	local tip = { title = dayStr, tr = 0.85, tg = 0.85, tb = 0.85, lines = {} }
 	local L = tip.lines
 
@@ -485,11 +584,14 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 	local nKills, nTurnin = 0, 0
 	local hKills, hBG, hTurnin, hBonus = 0, 0, 0, 0
 	local dayFirstT, dayLastT, dayTotal = nil, nil, 0
+	local dayActiveTime = 0  -- sum of per-group spans (active time only)
 
 	for _, g in ipairs(dayGroups) do
-		if not dayFirstT or g.startT < dayFirstT then dayFirstT = g.startT end
-		if not dayLastT  or g.lastT  > dayLastT  then dayLastT  = g.lastT  end
+		if not dayFirstT or g.lastT  < dayFirstT then dayFirstT = g.lastT  end
+		if not dayLastT  or g.startT > dayLastT  then dayLastT  = g.startT end
 		dayTotal = dayTotal + g.total
+		local gSpan = g.startT - g.lastT
+		if gSpan > 0 then dayActiveTime = dayActiveTime + gSpan end
 		if g.isBG then
 			nBGs = nBGs + 1
 			if g.result == "win"  then nWins   = nWins   + 1 end
@@ -509,11 +611,10 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 
 	-- Time range + duration
 	if dayFirstT then
-		local span = (dayLastT or dayFirstT) - dayFirstT
 		local tstr = dayFirstT ~= dayLastT
 			and (FmtTime(dayFirstT) .. " - " .. FmtTime(dayLastT))
 			or FmtTime(dayFirstT)
-		if span > 60 then tstr = tstr .. "  (" .. math.floor(span/60) .. "m)" end
+		if dayActiveTime > 60 then tstr = tstr .. "  (" .. FmtDuration(dayActiveTime) .. ")" end
 		table.insert(L, { tstr, nil, 0.45, 0.45, 0.45 })
 		local dailyBG = GetDailyBG(dayFirstT)
 		if dailyBG then
@@ -551,12 +652,9 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 	if hBonus>0  then nSrc=nSrc+1 end
 	if nSrc > 1 then table.insert(L, { "--------------------", nil, 0.25, 0.25, 0.25 }) end
 	table.insert(L, { "Total",    "+" .. FmtHonor(dayTotal), 1.0, 0.82, 0.0, 0.867, 0.733, 0.267 })
-	if dayFirstT and dayLastT then
-		local span = dayLastT - dayFirstT
-		if span > 60 then
-			local hph = math.floor(dayTotal * 3600 / span)
-			table.insert(L, { "Honor/hr", FmtHonor(hph), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267 })
-		end
+	if dayActiveTime > 60 then
+		local hph = math.floor(dayTotal * 3600 / dayActiveTime)
+		table.insert(L, { "Honor/hr", FmtHonor(hph), 0.55, 0.55, 0.55, 0.867, 0.733, 0.267 })
 	end
 
 	-- Rank Progress section (only if rankPct data exists on entries)
@@ -570,27 +668,36 @@ local function BuildDayTip(dayStr, dayGroups, decayPct)
 			end
 		end
 	end
+	-- For today, use live API + persisted baseline so gain matches overlay
+	if isToday then
+		local liveRP = GetPVPRankProgress() or 0
+		if liveRP > 0 and (not dayLastRankPct or liveRP > dayLastRankPct) then
+			dayLastRankPct = liveRP
+		end
+		local _hs = GetDB()
+		local dsStart = _hs and _hs.dayStartProgress
+		if dsStart and (not dayFirstRankPct or dsStart < dayFirstRankPct) then
+			dayFirstRankPct = dsStart
+		end
+	end
 	local hasRankSection = (dayFirstRankPct and dayLastRankPct) or (decayPct and decayPct > 0.001)
 	if hasRankSection then
-		table.insert(L, { "", nil })
-		table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
 		local rankGain = nil
 		if dayFirstRankPct and dayLastRankPct then
 			rankGain = dayLastRankPct - dayFirstRankPct
 			if rankGain > 0.00005 then
-				local gainStr = "+" .. string.format("%.2f", rankGain * 100) .. "%"
-				table.insert(L, { "Progress", gainStr, 0.7, 0.7, 0.7, 0.27, 0.87, 0.47 })
+				AppendRankGainTip(L, rankGain, dayTotal, hKills, hBG + hTurnin + hBonus)
 			else
 				rankGain = nil
 			end
 		end
+		if not rankGain and decayPct and decayPct > 0.001 then
+			table.insert(L, { "", nil })
+			table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
+		end
 		if decayPct and decayPct > 0.001 then
 			local lostStr = "-" .. string.format("%.2f", decayPct * 100) .. "%"
 			table.insert(L, { "Decay", lostStr, 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
-		end
-		if rankGain and dayTotal > 0 then
-			local honorPer1 = math.floor(dayTotal / (rankGain * 100))
-			table.insert(L, { "Honor per 1%", FmtHonor(honorPer1), 0.7, 0.7, 0.7, 0.867, 0.733, 0.267 })
 		end
 	end
 
@@ -602,13 +709,18 @@ local function ShowGroupTip(anchor, tip)
 	GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
 	GameTooltip:ClearLines()
 	GameTooltip:SetText(tip.title, tip.tr or 1, tip.tg or 1, tip.tb or 1)
+	local shift = IsShiftKeyDown()
 	for _, ln in ipairs(tip.lines) do
-		if ln[1] == "" and not ln[2] then
-			GameTooltip:AddLine(" ")
-		elseif ln[2] then
-			GameTooltip:AddDoubleLine(ln[1], ln[2], ln[3] or 0.8, ln[4] or 0.8, ln[5] or 0.8, ln[6] or 0.8, ln[7] or 0.8, ln[8] or 0.8)
+		if ln[9] and not shift then
+			-- skip shift-only lines
 		else
-			GameTooltip:AddLine(ln[1], ln[3] or 0.8, ln[4] or 0.8, ln[5] or 0.8)
+			if ln[1] == "" and not ln[2] then
+				GameTooltip:AddLine(" ")
+			elseif ln[2] then
+				GameTooltip:AddDoubleLine(ln[1], ln[2], ln[3] or 0.8, ln[4] or 0.8, ln[5] or 0.8, ln[6] or 0.8, ln[7] or 0.8, ln[8] or 0.8)
+			else
+				GameTooltip:AddLine(ln[1], ln[3] or 0.8, ln[4] or 0.8, ln[5] or 0.8)
+			end
 		end
 	end
 	GameTooltip:Show()
@@ -625,6 +737,14 @@ local P = {
 
 local CONTENT_W = WIN_W - 22
 local HDR_BTN_W = CONTENT_W - 8
+
+-- Column X-offsets from TOPRIGHT (shared by day seps, week seps, and column headers)
+local COL_WL     = -260   -- W/L fraction
+local COL_PCT    = -214   -- Win rate %
+local COL_RKVAL  = -164   -- Rank % value
+local COL_RKICO  = -146   -- Rank icon
+local COL_GAIN   = -86    -- Rank gain %
+local COL_HONOR  = -18    -- Honor total
 
 -- Pool allocators
 local content  -- forward ref; set in CreateHistoryWindow
@@ -780,26 +900,26 @@ local function AcquireDateSep()
 		-- Daily BG icon (between date label and W/L)
 		btn._dailyIcon = btn:CreateTexture(nil, "ARTWORK")
 		btn._dailyIcon:SetWidth(12); btn._dailyIcon:SetHeight(12)
-		btn._dailyIcon:SetPoint("RIGHT", btn, "RIGHT", -270, 0)
+		btn._dailyIcon:SetPoint("RIGHT", btn._hdrWL, "LEFT", -2, 0)
 		btn._dailyIcon:Hide()
 		-- W/L fraction (fixed position)
 		btn._hdrWL = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrWL:SetFont(FONT, 10)
 		btn._hdrWL:SetJustifyH("RIGHT")
 		btn._hdrWL:SetWidth(48)
-		btn._hdrWL:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -260, -5)
+		btn._hdrWL:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_WL, -5)
 		-- Win rate % (fixed position)
 		btn._hdrPct = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrPct:SetFont(FONT, 10)
 		btn._hdrPct:SetJustifyH("RIGHT")
 		btn._hdrPct:SetWidth(40)
-		btn._hdrPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -214, -5)
+		btn._hdrPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_PCT, -5)
 		-- Current rank % value (fixed, left of rank icon)
 		btn._hdrRankPctVal = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrRankPctVal:SetFont(FONT, 10)
 		btn._hdrRankPctVal:SetJustifyH("RIGHT")
 		btn._hdrRankPctVal:SetWidth(36)
-		btn._hdrRankPctVal:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -164, -5)
+		btn._hdrRankPctVal:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_RKVAL, -5)
 		btn._hdrRankPctVal:SetTextColor(0.75, 0.75, 0.75)
 		btn._hdrRankPctVal:Hide()
 		-- Decay arrow icon (shown left of rank% val on reset days with decay)
@@ -812,14 +932,14 @@ local function AcquireDateSep()
 		-- Rank icon (fixed, left of rank% val)
 		btn._hdrRankIcon = btn:CreateTexture(nil, "ARTWORK")
 		btn._hdrRankIcon:SetWidth(12); btn._hdrRankIcon:SetHeight(12)
-		btn._hdrRankIcon:SetPoint("RIGHT", btn, "RIGHT", -146, 0)
+		btn._hdrRankIcon:SetPoint("RIGHT", btn, "RIGHT", COL_RKICO, 0)
 		btn._hdrRankIcon:Hide()
 		-- Rank progression +gain% (fixed, left of faction badge)
 		btn._hdrRankPct = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrRankPct:SetFont(FONT, 10)
 		btn._hdrRankPct:SetJustifyH("RIGHT")
 		btn._hdrRankPct:SetWidth(54)
-		btn._hdrRankPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -86, -5)
+		btn._hdrRankPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_GAIN, -5)
 		btn._hdrRankPct:SetTextColor(0.27, 0.87, 0.47)
 		btn._hdrRankPct:Hide()
 		-- Day total honor (just left of faction badge)
@@ -827,7 +947,7 @@ local function AcquireDateSep()
 		btn._hdrAmt:SetFont(FONT, 10, "OUTLINE")
 		btn._hdrAmt:SetJustifyH("RIGHT")
 		btn._hdrAmt:SetWidth(56)
-		btn._hdrAmt:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -18, -4)
+		btn._hdrAmt:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_HONOR, -4)
 		-- Faction badge (rightmost element)
 		btn._factionBadge = btn:CreateTexture(nil, "ARTWORK")
 		btn._factionBadge:SetWidth(14); btn._factionBadge:SetHeight(14)
@@ -880,26 +1000,39 @@ local function AcquireWeekSep()
 		btn._hdrWL:SetFont(FONT, 10)
 		btn._hdrWL:SetJustifyH("RIGHT")
 		btn._hdrWL:SetWidth(48)
-		btn._hdrWL:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -260, -6)
+		btn._hdrWL:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_WL, -6)
 		-- Win rate %
 		btn._hdrPct = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrPct:SetFont(FONT, 10)
 		btn._hdrPct:SetJustifyH("RIGHT")
 		btn._hdrPct:SetWidth(40)
-		btn._hdrPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -214, -6)
+		btn._hdrPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_PCT, -6)
 		-- Rank gain %
 		btn._hdrRankPct = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrRankPct:SetFont(FONT, 10)
 		btn._hdrRankPct:SetJustifyH("RIGHT")
 		btn._hdrRankPct:SetWidth(54)
-		btn._hdrRankPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -86, -6)
+		btn._hdrRankPct:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_GAIN, -6)
 		btn._hdrRankPct:SetTextColor(0.27, 0.87, 0.47)
+		-- Rank icon (highest achieved during week)
+		btn._hdrRankIcon = btn:CreateTexture(nil, "ARTWORK")
+		btn._hdrRankIcon:SetWidth(14); btn._hdrRankIcon:SetHeight(14)
+		btn._hdrRankIcon:SetPoint("RIGHT", btn, "RIGHT", COL_RKICO, 0)
+		btn._hdrRankIcon:Hide()
+		-- Rank % value (right of rank icon)
+		btn._hdrRankPctVal = btn:CreateFontString(nil, "OVERLAY")
+		btn._hdrRankPctVal:SetFont(FONT, 10)
+		btn._hdrRankPctVal:SetJustifyH("RIGHT")
+		btn._hdrRankPctVal:SetWidth(36)
+		btn._hdrRankPctVal:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_RKVAL + 2, -6)
+		btn._hdrRankPctVal:SetTextColor(0.75, 0.75, 0.75)
+		btn._hdrRankPctVal:Hide()
 		-- Week total honor
 		btn._hdrAmt = btn:CreateFontString(nil, "OVERLAY")
 		btn._hdrAmt:SetFont(FONT, 11, "OUTLINE")
 		btn._hdrAmt:SetJustifyH("RIGHT")
 		btn._hdrAmt:SetWidth(56)
-		btn._hdrAmt:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -18, -4)
+		btn._hdrAmt:SetPoint("TOPRIGHT", btn, "TOPRIGHT", COL_HONOR, -4)
 		-- Faction badge
 		btn._factionBadge = btn:CreateTexture(nil, "ARTWORK")
 		btn._factionBadge:SetWidth(14); btn._factionBadge:SetHeight(14)
@@ -937,10 +1070,11 @@ local _dayCollapsed = {}  -- dayStr → bool; true = day collapsed
 local _weekCollapsed = {} -- weeksAgo number → bool; true = whole week collapsed
 local _knownDays    = {}  -- dayStr → true; all days seen in last RefreshList
 -- _VS: view-state flags packed into one table to reduce upvalue pressure on RefreshList
-local _VS = { hideZero = false, compactMode = 0, renderSC = nil }
+local _VS = { hideZero = false, compactMode = 0, renderSC = nil, dailyBG = GetDailyBG, bgIcons = _BG_MARK_ICON, knownWeeks = {} }
 -- hideZero: when true, groups/entries with +0 honor are hidden
 -- compactMode: 0=normal, 1=compact (consecutive), 2=merged (one per type), 3=super compact (per day)
 -- renderSC: set to RenderSuperCompactDay after its definition
+-- dailyBG: GetDailyBG function ref;  bgIcons: _BG_MARK_ICON table ref
 
 -- ===== Window state =====
 local Win
@@ -1184,18 +1318,20 @@ end
 local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 	local renderList = CompactEntries(entries, hideZero)
 	for _, e in ipairs(renderList) do
-		if not (hideZero and (e.amount or 0) == 0) then
+		-- Never render tick entries with negative delta (weekly decay artefacts)
+		local skipNegTick = e.type == "tick" and e.rankPct and e.prevRankPct and e.rankPct < e.prevRankPct
+		if not skipNegTick and not (hideZero and (e.amount or 0) == 0 and e.type ~= "tick") then
 			local ei = AcquireEntry()
 			P.ts[ei]:Hide()
 			local isConcerted = (e.type == "turnin" or e.type == "award")
 				and e.questName
-				and _CONCERTED_QUEST[string.lower(e.questName)]
+				and _CONCERTED_QUEST[e.questName]
 			P.icon2[ei]:Hide(); P.icon3[ei]:Hide()
 			if e.type == "_compact" then
 				-- Compact summary row — pick icon by subtype
 				local compactIcon
 				if e.subtype == "kill" then
-					compactIcon = "Interface\\Icons\\Ability_SteelMelee"
+					compactIcon = "Interface\\Icons\\Ability_DualWield"
 				elseif e.subtype == "turnin" then
 					compactIcon = _BG_MARK_ICON[e.zone] or "Interface\\Icons\\INV_Misc_Coin_04"
 				elseif e.subtype == "award" then
@@ -1228,20 +1364,36 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				P.name[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 59, -yOff - 1)
 			else
 				local iconTex = nil
-				if e.type == "award" or e.type == "turnin" then
+				local iconGrey = false
+				if e.type == "tick" then
+					iconTex = "Interface\\Icons\\Spell_Holy_MindVision"
+				elseif e.type == "award" or e.type == "turnin" then
 					iconTex = _BG_MARK_ICON[e.zone]
 						or _BG_MARK_ICON[QuestToBG(e.questName) or ""]
-				elseif e.type == "kill" and e.victimRank then
-					local rankNum = GetRankNum(e.victimRank)
-					if rankNum > 0 then
-						iconTex = string.format(
-							"Interface\\PvPRankBadges\\PvPRank%02d", rankNum)
+				elseif e.type == "kill" then
+					if e.victimRank then
+						local rankNum = GetRankNum(e.victimRank)
+						if rankNum > 0 then
+							iconTex = string.format(
+								"Interface\\PvPRankBadges\\PvPRank%02d", rankNum)
+						end
+					end
+					if not iconTex then
+						iconTex = "Interface\\Icons\\Spell_Magic_LesserInvisibilty"
+						iconGrey = true
 					end
 				end
 				if iconTex then
 					P.icon[ei]:ClearAllPoints()
 					P.icon[ei]:SetTexture(iconTex)
 					P.icon[ei]:SetTexCoord(0, 1, 0, 1)
+					if iconGrey then
+						P.icon[ei]:SetDesaturated(1)
+						P.icon[ei]:SetVertexColor(0.6, 0.6, 0.6)
+					else
+						P.icon[ei]:SetDesaturated(nil)
+						P.icon[ei]:SetVertexColor(1, 1, 1)
+					end
 					P.icon[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 28, -yOff)
 					P.icon[ei]:Show()
 					P.name[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 46, -yOff - 1)
@@ -1294,19 +1446,35 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				nameText = (e.zone or "BG Award") .. ts
 				nr, ng, nb = 0.867, 0.733, 0.267; ar, ag, ab = 0.867, 0.733, 0.267
 				amtText = "+" .. FmtHonor(e.amount)
+			elseif e.type == "tick" then
+				local deltaStr = ""
+				if e.rankPct and e.prevRankPct then
+					local d = (e.rankPct - e.prevRankPct) * 100
+					deltaStr = string.format("+%.2f%%", d)
+				end
+				nameText = "Rank Progression |cff505050" .. FmtTime(e.t) .. "|r"
+				nr, ng, nb = 0.27, 0.87, 0.47; ar, ag, ab = 0.27, 0.87, 0.47
+				amtText = deltaStr
 			else
 				local ts = e._merged and "" or (" |cff505050" .. FmtTime(e.t) .. "|r")
 				nameText = (e.raw or e.zone or "?") .. ts
 				nr, ng, nb = 0.5, 0.5, 0.5; ar, ag, ab = 0.5, 0.5, 0.5
 				amtText = "+" .. FmtHonor(e.amount)
 			end
-			if (e.amount or 0) == 0 then
+			if (e.amount or 0) == 0 and e.type ~= "tick" then
 				nr, ng, nb = 0.28, 0.28, 0.28
 				ar, ag, ab = 0.28, 0.28, 0.28
 			end
 			P.name[ei]:SetText(nameText)
 			P.name[ei]:SetTextColor(nr, ng, nb)
-			P.amt[ei]:SetPoint("TOPRIGHT", content, "TOPRIGHT", amtOffset, -yOff - 1)
+			if e.type == "tick" then
+				-- Align percent under the group header's gain % column
+				P.amt[ei]:ClearAllPoints()
+				P.amt[ei]:SetPoint("TOPRIGHT", content, "TOPRIGHT", -82, -yOff - 1)
+			else
+				P.amt[ei]:ClearAllPoints()
+				P.amt[ei]:SetPoint("TOPRIGHT", content, "TOPRIGHT", amtOffset, -yOff - 1)
+			end
 			P.amt[ei]:SetText(amtText)
 			P.amt[ei]:SetTextColor(ar, ag, ab)
 			P.estripe[ei]:SetVertexColor(cr, cg_c, cb)
@@ -1317,6 +1485,30 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 			P.row[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -yOff)
 			if e.type == "_compact" then
 				P.row[ei]._tip = BuildCompactTip(e)
+			elseif e.type == "tick" then
+				local newPct = e.rankPct and string.format("%.2f%%", e.rankPct * 100) or "?"
+				local oldPct = e.prevRankPct and string.format("%.2f%%", e.prevRankPct * 100) or "?"
+				local delta = ""
+				if e.rankPct and e.prevRankPct then
+					local d = (e.rankPct - e.prevRankPct) * 100
+					if d >= 0 then
+						delta = string.format("+%.2f%%", d)
+					else
+						delta = string.format("-%.2f%%", -d)
+					end
+				end
+				local tip = {
+					title = "Rank Progression",
+					tr = 0.27, tg = 0.87, tb = 0.47,
+					lines = {
+						{ FmtTime(e.t), nil, 0.5, 0.5, 0.5 },
+						{ "", nil },
+						{ "Rank", oldPct, 0.6, 0.6, 0.6, 0.75, 0.75, 0.75 },
+						{ "Progression", delta, 0.6, 0.6, 0.6, 0.27, 0.87, 0.47 },
+						{ "Total", newPct, 0.6, 0.6, 0.6, 1, 1, 1 },
+					},
+				}
+				P.row[ei]._tip = tip
 			else
 				P.row[ei]._tip = nil
 			end
@@ -1395,7 +1587,7 @@ local function RenderSuperCompactDay(dayStr, dayGroups, yOff, hideZero)
 		catData[ck] = { n = 0, total = 0 }
 	end
 	for _, g in ipairs(dayGroups) do
-		if not (hideZero and g.total == 0) then
+		if not (hideZero and g.total == 0 and (g.chainedRankGain or 0) == 0) then
 			local ck = GroupCat(g)
 			catData[ck].n = catData[ck].n + 1
 			catData[ck].total = catData[ck].total + g.total
@@ -1499,40 +1691,50 @@ local function RefreshList()
 	local _weekLosses    = {}
 	local _weekTopRankPct = {}
 	local _weekBotRankPct = {}
+	local _weekTopRankNum = {}
 	_knownDays = {}
+	_VS.knownWeeks = {}
 	for _, g in ipairs(groups) do
 		local ds = FmtDate(g.startT)
 		local wa = CalcWeeksAgo(g.startT, _thisResetT)
-		_knownDays[ds] = true
-		if not _dayGroupsMap[ds] then _dayGroupsMap[ds] = {} end
-		table.insert(_dayGroupsMap[ds], g)
+		local dk = ds .. "|" .. wa  -- composite day key: separates same calendar day across weekly resets
+		_knownDays[dk] = true
+		_VS.knownWeeks[wa] = true
+		if not _dayGroupsMap[dk] then _dayGroupsMap[dk] = {} end
+		table.insert(_dayGroupsMap[dk], g)
 		if g.isBG and g.result then
-			if not _dayWins[ds]  then _dayWins[ds] = 0;  _dayLosses[ds] = 0  end
+			if not _dayWins[dk]  then _dayWins[dk] = 0;  _dayLosses[dk] = 0  end
 			if not _weekWins[wa] then _weekWins[wa] = 0; _weekLosses[wa] = 0 end
 			if g.result == "win" then
-				_dayWins[ds] = _dayWins[ds] + 1;   _weekWins[wa] = _weekWins[wa] + 1
+				_dayWins[dk] = _dayWins[dk] + 1;   _weekWins[wa] = _weekWins[wa] + 1
 			else
-				_dayLosses[ds] = _dayLosses[ds] + 1; _weekLosses[wa] = _weekLosses[wa] + 1
+				_dayLosses[dk] = _dayLosses[dk] + 1; _weekLosses[wa] = _weekLosses[wa] + 1
 			end
 		end
 		_weekHonor[wa] = (_weekHonor[wa] or 0) + g.total
 		for _, e in ipairs(g.entries) do
-			if e.rankPct ~= nil then
-				if not _dayTopRankPct[ds] then
-					_dayTopRankPct[ds] = e.rankPct
-					_dayTopRankNum[ds] = e.rankNum or 0
+			if e.rankPct and e.rankPct > 0 then
+				if not _dayTopRankPct[dk] then
+					_dayTopRankPct[dk] = e.rankPct
+					_dayTopRankNum[dk] = e.rankNum or 0
 				end
-				_dayBotRankPct[ds] = e.rankPct
-				if not _weekTopRankPct[wa] then _weekTopRankPct[wa] = e.rankPct end
+				_dayBotRankPct[dk] = e.rankPct
+				if not _weekTopRankPct[wa] then
+					_weekTopRankPct[wa] = e.rankPct
+					_weekTopRankNum[wa] = e.rankNum or 0
+				end
+				if (_weekTopRankNum[wa] or 0) == 0 and (e.rankNum or 0) > 0 then
+					_weekTopRankNum[wa] = e.rankNum
+				end
 				_weekBotRankPct[wa] = e.rankPct
 			end
 		end
 	end
 	local _dayTotals = {}
-	for ds, dgs in pairs(_dayGroupsMap) do
+	for dk, dgs in pairs(_dayGroupsMap) do
 		local t = 0
 		for _, dg in ipairs(dgs) do t = t + dg.total end
-		_dayTotals[ds] = t
+		_dayTotals[dk] = t
 	end
 
 	-- Pre-compute chained rank gain per group.
@@ -1541,10 +1743,11 @@ local function RefreshList()
 	-- The oldest group in each day uses its own oldest-to-newest span.
 	-- This guarantees the sum of all group gains = day total gain.
 	for _, g in ipairs(groups) do
-		-- Find this group's newest and oldest rankPct
+		-- Find this group's newest and oldest rankPct.
+		-- Skip rankPct == 0: GetPVPRankProgress() returns 0 during loading screens.
 		local top, bot = nil, nil
 		for _, e in ipairs(g.entries) do
-			if e.rankPct ~= nil then
+			if e.rankPct and e.rankPct > 0 then
 				if not top then top = e.rankPct end
 				bot = e.rankPct
 			end
@@ -1578,9 +1781,11 @@ local function RefreshList()
 	end
 
 	local _prevWeeksAgo = nil
+	local _todayStr = date("%a %d %b", time())
 	for gi, g in ipairs(groups) do
 		local dayStr = FmtDate(g.startT)
 		local weeksAgo = CalcWeeksAgo(g.startT, _thisResetT)
+		local dk = dayStr .. "|" .. weeksAgo  -- composite day key
 
 		-- Week separator: insert at the first group of each new week bucket
 		if weeksAgo ~= _prevWeeksAgo then
@@ -1598,8 +1803,12 @@ local function RefreshList()
 			local wLabelBright = math.max(0.35, 1.0 - weeksAgo * 0.25)
 			wsep._fs:SetTextColor(wLabelBright, wLabelBright, wLabelBright)
 			wsep._fs:SetText(WeekLabel(weeksAgo, _thisResetT))
-			-- Honor total
+			-- Honor total: use API for current week, tracked sum for past weeks
 			local wHonor = _weekHonor[weeksAgo] or 0
+			if weeksAgo == 0 and GetPVPThisWeekStats then
+				local _, apiHonor = GetPVPThisWeekStats()
+				if apiHonor and apiHonor > wHonor then wHonor = apiHonor end
+			end
 			if wHonor > 0 then
 				wsep._hdrAmt:SetText("|cffddbb44+" .. FmtHonor(math.floor(wHonor)) .. "|r")
 				wsep._hdrAmt:Show()
@@ -1616,6 +1825,13 @@ local function RefreshList()
 			-- Rank gain for the week; 6: red text when net negative (decay week)
 			local wTop = _weekTopRankPct[weeksAgo]
 			local wBot = _weekBotRankPct[weeksAgo]
+			-- For current week, use live API + persisted baseline so gain matches overlay
+			if weeksAgo == 0 then
+				local liveRP = GetPVPRankProgress() or 0
+				if liveRP > 0 and (not wTop or liveRP > wTop) then wTop = liveRP end
+				local wkStart = hs and hs.weeklyStartProgress
+				if wkStart and (not wBot or wkStart < wBot) then wBot = wkStart end
+			end
 			local wGain = (wTop and wBot) and (wTop - wBot) or 0
 			if wGain > 0.00005 then
 				wsep._hdrRankPct:SetText("+" .. string.format("%.2f", wGain * 100) .. "%")
@@ -1626,6 +1842,24 @@ local function RefreshList()
 				wsep._hdrRankPct:SetTextColor(1.0, 0.30, 0.30)
 				wsep._hdrRankPct:Show()
 			else wsep._hdrRankPct:Hide() end
+			-- Rank badge + current rank %
+			local wRankNum = _weekTopRankNum[weeksAgo] or 0
+			if wRankNum == 0 then wRankNum = UnitPVPRank("player") or 0 end
+			local wRankTex = 0
+			if wRankNum > 0 then
+				local _, t = GetPVPRankInfo(wRankNum)
+				wRankTex = t or wRankNum
+			end
+			if wRankTex > 0 then
+				wsep._hdrRankIcon:SetTexture(string.format("Interface\\PvPRankBadges\\PvPRank%02d", wRankTex))
+				wsep._hdrRankIcon:Show()
+				local wTopPct = wTop or 0
+				wsep._hdrRankPctVal:SetText(string.format("%.1f", wTopPct * 100) .. "%")
+				wsep._hdrRankPctVal:Show()
+			else
+				wsep._hdrRankIcon:Hide()
+				wsep._hdrRankPctVal:Hide()
+			end
 			wsep._factionBadge:Show()
 			local capturedWA = weeksAgo
 			wsep:SetScript("OnClick", function()
@@ -1641,7 +1875,12 @@ local function RefreshList()
 					end
 				end
 			end
-			wsep._tip = BuildWeekTip(WeekLabel(weeksAgo, _thisResetT), weekGroups, _weekTopRankPct[weeksAgo], _weekBotRankPct[weeksAgo])
+			local wApiHonor = nil
+			if weeksAgo == 0 and GetPVPThisWeekStats then
+				local _, ah = GetPVPThisWeekStats()
+				wApiHonor = ah
+			end
+			wsep._tip = BuildWeekTip(WeekLabel(weeksAgo, _thisResetT), weekGroups, wTop, wBot, wApiHonor)
 			wsep:SetScript("OnEnter", function() ShowGroupTip(this, this._tip) end)
 			wsep:SetScript("OnLeave", function() GameTooltip:Hide() end)
 			wsep:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -yOff)
@@ -1649,8 +1888,8 @@ local function RefreshList()
 		end
 
 		-- Date separator
-		if dayStr ~= lastDate then
-			lastDate = dayStr
+		if dk ~= lastDate then
+			lastDate = dk
 			if not _weekCollapsed[weeksAgo] then
 			local sep = AcquireDateSep()
 			sep:SetHeight(DATESEP_H)
@@ -1659,15 +1898,15 @@ local function RefreshList()
 			-- Bar brightness: dims with age; warm tint to echo week sep amber
 			local barBright = math.max(0.2, 0.75 - math.min(weeksAgo, 3) * 0.15)
 			sep._bar:SetVertexColor(barBright, barBright, barBright, 1)
-			local dayOpen = not _dayCollapsed[dayStr]
-			local capturedDay = dayStr
+			local dayOpen = not _dayCollapsed[dk]
+			local capturedDay = dk
 			-- 3: label brightness tracks bar brightness
 			local lblBright = math.max(0.38, barBright + 0.12)
 			sep._fs:SetTextColor(lblBright, lblBright, lblBright)
 			sep._fs:SetText(FmtDateLabel(dayStr))
 			-- Daily BG icon
-			local dailyBG = GetDailyBG(g.startT)
-			local dailyTex = dailyBG and _BG_MARK_ICON[dailyBG]
+			local dailyBG = _VS.dailyBG(g.startT)
+			local dailyTex = dailyBG and _VS.bgIcons[dailyBG]
 			if dailyTex then
 				sep._dailyIcon:SetTexture(dailyTex)
 				sep._dailyIcon:Show()
@@ -1680,8 +1919,8 @@ local function RefreshList()
 				RefreshList()
 			end)
 			-- BG W/L + wr% record
-			local nW = _dayWins[dayStr] or 0
-			local nL = _dayLosses[dayStr] or 0
+			local nW = _dayWins[dk] or 0
+			local nL = _dayLosses[dk] or 0
 			if nW + nL > 0 then
 				local pct = math.floor(nW * 100 / (nW + nL))
 				sep._hdrWL:SetText("|cff4dff4d" .. nW .. "|r|cff888888/|r|cffff4d4d" .. nL .. "|r")
@@ -1690,7 +1929,7 @@ local function RefreshList()
 			else
 				sep._hdrWL:Hide(); sep._hdrPct:Hide()
 			end
-			local dayTotal = _dayTotals[dayStr] or 0
+			local dayTotal = _dayTotals[dk] or 0
 			if dayTotal > 0 then
 				sep._hdrAmt:SetText("|cfff2e095+" .. FmtHonor(math.floor(dayTotal)) .. "|r")
 				sep._hdrAmt:Show()
@@ -1698,33 +1937,36 @@ local function RefreshList()
 				sep._hdrAmt:Hide()
 			end
 			-- Day rank progression + current rank
-			local dayFirstRankPct, dayLastRankPct, dayLastRankNum = nil, nil, 0
-			for _, _dg in ipairs(_dayGroupsMap[dayStr] or {}) do
-				for _, _de in ipairs(_dg.entries) do
-					if _de.rankPct ~= nil then
-						if not dayLastRankPct then
-							dayLastRankPct = _de.rankPct
-							dayLastRankNum = _de.rankNum or 0
-						end
-						dayFirstRankPct = _de.rankPct
-					end
-				end
-			end
+			local dayLastRankPct  = _dayTopRankPct[dk]
+			local dayFirstRankPct = _dayBotRankPct[dk]
+			local dayLastRankNum  = _dayTopRankNum[dk] or 0
 			if dayLastRankNum == 0 then dayLastRankNum = UnitPVPRank("player") or 0 end
 			local dayRankTex = 0
 			if dayLastRankNum > 0 then
 				local _, t = GetPVPRankInfo(dayLastRankNum)
 				dayRankTex = t or dayLastRankNum
 			end
+			-- For today, use live API + persisted baseline so gain matches overlay
+			if dayStr == _todayStr and weeksAgo == 0 then
+				local liveRP = GetPVPRankProgress() or 0
+				if liveRP > 0 and (not dayLastRankPct or liveRP > dayLastRankPct) then
+					dayLastRankPct = liveRP
+				end
+				local dsStart = hs and hs.dayStartProgress
+				if dsStart and (not dayFirstRankPct or dsStart < dayFirstRankPct) then
+					dayFirstRankPct = dsStart
+				end
+			end
 			local dayRankGain = (dayFirstRankPct and dayLastRankPct) and (dayLastRankPct - dayFirstRankPct) or 0
 			-- Decay detection: Wednesday rankPct start lower than previous calendar day rankPct end
 			local prevDayStr = date("%a %d %b", g.startT - 86400)
-			local decayOccurred = (string.sub(dayStr, 1, 3) == "Wed")
-				and _dayBotRankPct[dayStr] ~= nil
-				and _dayTopRankPct[prevDayStr] ~= nil
-				and (_dayTopRankPct[prevDayStr] - _dayBotRankPct[dayStr] > 0.001)
-			local decayAmt = decayOccurred and (_dayTopRankPct[prevDayStr] - _dayBotRankPct[dayStr]) or nil
-			sep._tip = BuildDayTip(dayStr, _dayGroupsMap[dayStr] or {}, decayAmt)
+			local prevDK = prevDayStr .. "|" .. (weeksAgo + 1)
+			local decayOccurred = (string.sub(dayStr, 1, 3) == "Wed") and weeksAgo == 0
+				and _dayBotRankPct[dk] ~= nil
+				and _dayTopRankPct[prevDK] ~= nil
+				and (_dayTopRankPct[prevDK] - _dayBotRankPct[dk] > 0.001)
+			local decayAmt = decayOccurred and (_dayTopRankPct[prevDK] - _dayBotRankPct[dk]) or nil
+			sep._tip = BuildDayTip(dayStr, _dayGroupsMap[dk] or {}, decayAmt, dayStr == _todayStr and weeksAgo == 0)
 			sep:SetScript("OnEnter", function() ShowGroupTip(this, this._tip) end)
 			sep:SetScript("OnLeave", function() GameTooltip:Hide() end)
 			-- Rank display
@@ -1768,14 +2010,14 @@ local function RefreshList()
 		end
 
 		if not _weekCollapsed[weeksAgo] then
-		if not _dayCollapsed[dayStr] then
+		if not _dayCollapsed[dk] then
 		if _VS.compactMode == 3 then
 		-- Super compact: one row per category per day, rendered once
-		if not _scRendered[dayStr] then
-			_scRendered[dayStr] = true
-			yOff = _VS.renderSC(dayStr, _dayGroupsMap[dayStr] or {}, yOff, _VS.hideZero)
+		if not _scRendered[dk] then
+			_scRendered[dk] = true
+			yOff = _VS.renderSC(dk, _dayGroupsMap[dk] or {}, yOff, _VS.hideZero)
 		end
-		elseif not (_VS.hideZero and g.total == 0) then
+		elseif not (_VS.hideZero and g.total == 0 and (g.chainedRankGain or 0) == 0) then
 		-- Group header button
 		local gKey = g.gKey
 		if _collapsed[gKey] == nil then
@@ -1838,23 +2080,7 @@ local function RefreshList()
 		btn._rt:Hide()
 		btn._ra:SetText("|cffddbb44+" .. FmtHonor(g.total) .. "|r")
 
--- Rank progression + current rank icon/pct
-			local grpLastRankPct, grpFirstRankPct, grpLastRankNum = nil, nil, 0
-			for _, _e in ipairs(g.entries) do
-				if _e.rankPct ~= nil then
-					if not grpLastRankPct then
-						grpLastRankPct = _e.rankPct
-						grpLastRankNum = _e.rankNum or 0
-					end
-					grpFirstRankPct = _e.rankPct
-				end
-			end
-			if grpLastRankNum == 0 then grpLastRankNum = UnitPVPRank("player") or 0 end
-			local grpRankTex = 0
-			if grpLastRankNum > 0 then
-				local _, t = GetPVPRankInfo(grpLastRankNum)
-				grpRankTex = t or grpLastRankNum
-			end
+-- Rank progression gain
 			local grpRankGain = g.chainedRankGain or 0
 			-- _ra always flush right; _rp to its left when gain>0; no rank icon/pct on group rows
 			btn._rankIcon:Hide()
@@ -1888,7 +2114,8 @@ local function RefreshList()
 
 		-- Entry rows (shown when group is expanded)
 		if isOpen then
-			yOff = RenderEntries(g.entries, yOff, cr, cg_c, cb, amtOffset, _VS.hideZero)
+			local hz = _VS.hideZero and (g.chainedRankGain or 0) == 0
+			yOff = RenderEntries(g.entries, yOff, cr, cg_c, cb, amtOffset, hz)
 		end
 		end  -- if _VS.compactMode / _VS.hideZero group
 		end  -- if not _dayCollapsed
@@ -1900,13 +2127,32 @@ local function RefreshList()
 	sf:UpdateScrollChildRect()
 	if updateThumb then updateThumb() end
 end
-function HonorHistory_Refresh()
+function THSE:HistoryRefresh()
 	if not Win or not Win:IsVisible() then return end
 	RefreshList()
 end
 
+function THSE:HistoryGetBGScoreRank()
+	return _bgScoreRank
+end
+
 -- ===== Create window =====
 local function CreateHistoryWindow()
+	-- Restore persisted view state
+	local hs = GetDB()
+	if hs then
+		if hs.histCompactMode then _VS.compactMode = hs.histCompactMode end
+		if hs.histHideZero then _VS.hideZero = hs.histHideZero end
+		-- Restore collapse state, then link tables so mutations auto-persist
+		if hs.histDayCollapsed then
+			for k, v in pairs(hs.histDayCollapsed) do _dayCollapsed[k] = v end
+		end
+		if hs.histWeekCollapsed then
+			for k, v in pairs(hs.histWeekCollapsed) do _weekCollapsed[k] = v end
+		end
+		hs.histDayCollapsed  = _dayCollapsed
+		hs.histWeekCollapsed = _weekCollapsed
+	end
 	Win = CreateFrame("Frame", "HonorHistoryFrame", UIParent)
 	Win:SetWidth(WIN_W)
 	Win:SetHeight(WIN_H)
@@ -2025,8 +2271,8 @@ local function CreateHistoryWindow()
 			expandBtn._tipDesc  = "Collapses all open days and groups."
 		else
 			expandFS:SetText("+")
-			expandBtn._tipTitle = "Expand All"
-			expandBtn._tipDesc  = "Expands all weeks and days."
+			expandBtn._tipTitle = "Expand"
+			expandBtn._tipDesc  = "Expands all weeks and today."
 		end
 	end
 
@@ -2038,23 +2284,33 @@ local function CreateHistoryWindow()
 		end
 		if anyGroupOpen then
 			for k, _ in pairs(_collapsed) do _collapsed[k] = true end
-			local anyDayOpen = false
-			for ds, _ in pairs(_knownDays) do
-				if not _dayCollapsed[ds] then anyDayOpen = true; break end
-			end
-			SetExpandIcon(anyDayOpen)
 			RefreshList()
 			return
 		end
-		-- Stage 2: toggle days
-		local anyDayOpen = false
-		for ds, _ in pairs(_knownDays) do
-			if not _dayCollapsed[ds] then anyDayOpen = true; break end
+		-- Stage 2: is today's day section open?
+		local todayDK = date("%a %d %b", time()) .. "|0"
+		if not _dayCollapsed[todayDK] and _knownDays[todayDK] then
+			_dayCollapsed[todayDK] = true
+			RefreshList()
+			return
 		end
-		for ds, _ in pairs(_knownDays) do
-			_dayCollapsed[ds] = anyDayOpen
+		-- Stage 3: are any weeks open?
+		local anyWeekOpen = false
+		for wa, _ in pairs(_VS.knownWeeks) do
+			if not _weekCollapsed[wa] then anyWeekOpen = true; break end
 		end
-		SetExpandIcon(not anyDayOpen)
+		if anyWeekOpen then
+			for wa, _ in pairs(_VS.knownWeeks) do
+				_weekCollapsed[wa] = true
+			end
+			RefreshList()
+			return
+		end
+		-- Everything collapsed — expand weeks + today's day only
+		for wa, _ in pairs(_VS.knownWeeks) do
+			_weekCollapsed[wa] = false
+		end
+		_dayCollapsed[todayDK] = false
 		RefreshList()
 	end)
 	SetExpandIcon(true)
@@ -2093,6 +2349,8 @@ local function CreateHistoryWindow()
 	end)
 	zeroBtn:SetScript("OnClick", function()
 		_VS.hideZero = not _VS.hideZero
+		local _hs = GetDB()
+		if _hs then _hs.histHideZero = _VS.hideZero end
 		UpdateZeroBtn()
 		RefreshList()
 	end)
@@ -2146,6 +2404,8 @@ local function CreateHistoryWindow()
 	end)
 	compactBtn:SetScript("OnClick", function()
 		_VS.compactMode = math.mod(_VS.compactMode + 1, 4)
+		local _hs = GetDB()
+		if _hs then _hs.histCompactMode = _VS.compactMode end
 		UpdateCompactBtn()
 		RefreshList()
 	end)
@@ -2169,11 +2429,11 @@ local function CreateHistoryWindow()
 		fs:SetText(text)
 		return fs
 	end
-	MakeColLabel("Wins",    -260, 48)
-	MakeColLabel("Win %",   -214, 40)
-	MakeColLabel("Rank",   -164, 60)
-	MakeColLabel("Gain %", -86,  54)
-	MakeColLabel("Honor",  -18,  56)
+	MakeColLabel("Wins",    COL_WL,    48)
+	MakeColLabel("Win %",   COL_PCT,   40)
+	MakeColLabel("Rank",    COL_RKVAL, 60)
+	MakeColLabel("Gain %",  COL_GAIN,  54)
+	MakeColLabel("Honor",   COL_HONOR, 56)
 
 -- Scroll frame (plain; thin custom scrollbar drawn by MakeThinScrollbar)
 	sf = CreateFrame("ScrollFrame", "HonorHistoryScrollFrame", Win)
@@ -2201,28 +2461,90 @@ _ef:RegisterEvent("CHAT_MSG_SYSTEM")                  -- "You have been awarded 
 _ef:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL")
 _ef:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE")
 _ef:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE")
-_ef:RegisterEvent("UPDATE_FACTION")                   -- rank bar tick arrives here
+_ef:RegisterEvent("UPDATE_FACTION")                   -- rank progress updates
+_ef:RegisterEvent("ZONE_CHANGED_NEW_AREA")              -- BG exit detection
+_ef:RegisterEvent("UPDATE_BATTLEFIELD_SCORE")            -- BG scoreboard data arrived
 
 local _pendingQuest   = nil
 local _pendingQuestTs = nil
 local PENDING_TTL     = 2  -- seconds
+local _lastBGZone     = nil  -- tracks which BG zone we are inside
 
 _ef:SetScript("OnEvent", function()
 	local hs = GetDB()
 
 	if event == "PLAYER_ENTERING_WORLD" then
 		if hs and not hs.honorHistory then hs.honorHistory = {} end
+		-- Initialise BG zone tracker
+		local z = GetRealZoneText()
+		_lastBGZone = IsBGZone(z) and z or nil
+		-- Prime BG scoreboard cache
+		if _lastBGZone then
+			if RequestBattlefieldScoreData then RequestBattlefieldScoreData() end
+			RefreshBGScoreCache()
+		end
+
+	elseif event == "ZONE_CHANGED_NEW_AREA" then
+		local z = GetRealZoneText()
+		if _lastBGZone and not IsBGZone(z) then
+			-- Left a BG zone → insert boundary marker
+			if hs and hs.honorHistory then
+				local e = { t = time(), type = "bgexit", zone = _lastBGZone, amount = 0 }
+				table.insert(hs.honorHistory, 1, e)
+				TrimHistory(hs)
+			end
+		end
+		_lastBGZone = IsBGZone(z) and z or nil
+		-- Request scoreboard data when entering a BG
+		if _lastBGZone and RequestBattlefieldScoreData then
+			RequestBattlefieldScoreData()
+		end
+
+	elseif event == "UPDATE_BATTLEFIELD_SCORE" then
+		RefreshBGScoreCache()
+		-- Backfill unresolved victim ranks on recent kill entries
+		if hs and hs.honorHistory then
+			local filled = 0
+			for i = 1, math.min(table.getn(hs.honorHistory), 200) do
+				local e = hs.honorHistory[i]
+				if e.type == "kill" and e.victim and not e.victimRank then
+					local rk = _bgScoreRank[e.victim] or _bgScoreRank[string.gsub(e.victim, "%-.*", "")]
+					if rk then e.victimRank = rk; filled = filled + 1 end
+				end
+			end
+			if filled > 0 and Win and Win:IsVisible() then RefreshList() end
+		end
 
 	elseif event == "UPDATE_FACTION" then
-		-- Rank bar updates arrive here after honor events. Always attribute
-		-- the updated rank progress to the most recent entry.
-		if hs and hs.honorHistory and table.getn(hs.honorHistory) > 0 then
+		-- Rank progress update — create a tick entry when progress changes.
+		-- Guard: skip if API hasn't loaded yet (returns 0 on login/reload).
+		local newPct = GetPVPRankProgress() or 0
+		if newPct > 0.0001 and hs and hs.honorHistory and table.getn(hs.honorHistory) > 0 then
 			local newest = hs.honorHistory[1]
-			if newest.type ~= "bgresult" then
-				local newPct = GetPVPRankProgress() or 0
-				if newPct ~= newest.rankPct then
-					newest.rankPct = newPct
-					newest.rankNum = UnitPVPRank("player") or 0
+			if newest.type ~= "bgresult" and newest.type ~= "bgexit" and newest.type ~= "tick" then
+				local prevPct = newest.rankPct or 0
+				-- Skip if no valid baseline (first load / corrupted entry)
+				-- Also require a meaningful change (> 0.01%) to avoid float noise on reload
+				-- Skip negative deltas (weekly decay) — never record rank loss as a tick
+				if prevPct > 0.0001 and (newPct - prevPct) > 0.0001 then
+					if not hs.honorHistory then hs.honorHistory = {} end
+					local thisW_hk, thisW_h = 0, 0
+					if GetPVPThisWeekStats then
+						thisW_hk, thisW_h = GetPVPThisWeekStats()
+					end
+					local te = {
+						t = time(),
+						type = "tick",
+						amount = 0,
+						zone = GetRealZoneText(),
+						rankPct = newPct,
+						prevRankPct = prevPct,
+						rankNum = UnitPVPRank("player") or 0,
+						tickHaHq = thisW_h or 0,
+						tickHk = thisW_hk or 0,
+					}
+					table.insert(hs.honorHistory, 1, te)
+					TrimHistory(hs)
 					if Win and Win:IsVisible() then RefreshList() end
 				end
 			end
@@ -2257,9 +2579,7 @@ _ef:SetScript("OnEvent", function()
 			local e = { t = time(), type = "bgresult", result = result,
 				zone = zone, amount = 0 }
 			table.insert(hs.honorHistory, 1, e)
-			while table.getn(hs.honorHistory) > MAX_ENTRIES do
-				table.remove(hs.honorHistory)
-			end
+			TrimHistory(hs)
 		end
 
 	elseif event == "QUEST_TURNED_IN" then
@@ -2293,19 +2613,30 @@ _ef:SetScript("OnEvent", function()
 			local e = { t=time(), type=entryType, amount=amount, zone=zone, questName=questName,
 				rankPct=GetPVPRankProgress() or 0, rankNum=UnitPVPRank("player") or 0 }
 			table.insert(hs.honorHistory, 1, e)
-			while table.getn(hs.honorHistory) > MAX_ENTRIES do
-				table.remove(hs.honorHistory)
-			end
+			TrimHistory(hs)
 			if Win and Win:IsVisible() then RefreshList() end
 			return
 		end
 
-		-- Quest turn-in fallback: "You have completed..."
+		-- Quest turn-in fallback: "X completed."
 		if string.find(lmsg, "completed") then
-			local bg = QuestToBG(msg)
-			if bg then
-				_pendingQuest   = bg
+			-- Check for Concerted Efforts / For Great Honor by name first
+			local foundConcerted = nil
+			for qname, _ in pairs(_CONCERTED_QUEST) do
+				if string.find(lmsg, string.lower(qname), 1, true) then
+					foundConcerted = qname
+					break
+				end
+			end
+			if foundConcerted then
+				_pendingQuest   = foundConcerted
 				_pendingQuestTs = time()
+			else
+				local bg = QuestToBG(msg)
+				if bg then
+					_pendingQuest   = bg
+					_pendingQuestTs = time()
+				end
 			end
 		end
 
@@ -2330,9 +2661,20 @@ _ef:SetScript("OnEvent", function()
 			local e = { t=time(), type="kill", amount=amount, zone=zone,
 				victim=victim, victimRank=victimRank, rankPct=GetPVPRankProgress() or 0, rankNum=UnitPVPRank("player") or 0 }
 			table.insert(hs.honorHistory, 1, e)
-			while table.getn(hs.honorHistory) > MAX_ENTRIES do
-				table.remove(hs.honorHistory)
-			end
+			TrimHistory(hs)
+			if Win and Win:IsVisible() then RefreshList() end
+			return
+		end
+
+		-- Zero-honor kill: "X dies, dishonorable kill." (server text for kills beyond 20k HKs)
+		local _, _, dv = string.find(msg, "(.+) dies, dishonorable kill")
+		if dv then
+			local zone = GetRealZoneText()
+			local victimRank = ScoreboardRank(dv)
+			local e = { t=time(), type="kill", amount=0, zone=zone,
+				victim=dv, victimRank=victimRank, rankPct=GetPVPRankProgress() or 0, rankNum=UnitPVPRank("player") or 0 }
+			table.insert(hs.honorHistory, 1, e)
+			TrimHistory(hs)
 			if Win and Win:IsVisible() then RefreshList() end
 			return
 		end
@@ -2367,15 +2709,13 @@ _ef:SetScript("OnEvent", function()
 			victim=victim, victimRank=victimRank, questName=questName,
 			rankPct=GetPVPRankProgress() or 0, rankNum=UnitPVPRank("player") or 0 }
 		table.insert(hs.honorHistory, 1, e)
-		while table.getn(hs.honorHistory) > MAX_ENTRIES do
-			table.remove(hs.honorHistory)
-		end
+		TrimHistory(hs)
 		if Win and Win:IsVisible() then RefreshList() end
 	end
 end)
 
 -- ===== Public API =====
-function HonorHistory_Open()
+function THSE:HistoryOpen()
 	if not Win then
 		CreateHistoryWindow()
 	end
@@ -2387,215 +2727,6 @@ function HonorHistory_Open()
 	end
 end
 
-function HonorHistory_Close()
+function THSE:HistoryClose()
 	if Win then Win:Hide() end
-end
-
--- ===== Export: compact data dump for rank/honor analysis =====
-local _exportFrame
-
-local function BuildExportText()
-	local hs = GetDB()
-	if not hs or not hs.honorHistory or table.getn(hs.honorHistory) == 0 then
-		return "-- No honor history data found."
-	end
-	local history = hs.honorHistory
-	local groups = BuildGroups(history)
-	local lines = {}
-
-	-- Header
-	local faction = UnitFactionGroup("player") or "?"
-	local rankNum = UnitPVPRank("player") or 0
-	local rankPct = GetPVPRankProgress() or 0
-	local rankName = ""
-	if rankNum > 0 then
-		rankName = GetPVPRankInfo(rankNum) or ""
-	end
-	table.insert(lines, "-- HonorSpy Export " .. date("%Y-%m-%d %H:%M"))
-	table.insert(lines, "-- Faction: " .. faction .. "  Rank: " .. rankName .. " (" .. rankNum .. ")  Progress: " .. string.format("%.2f", rankPct * 100) .. "%")
-	table.insert(lines, "-- Entries: " .. table.getn(history) .. "  Groups: " .. table.getn(groups))
-	table.insert(lines, "")
-
-	-- Organise groups by day
-	local dayOrder = {}
-	local dayMap   = {}
-	for _, g in ipairs(groups) do
-		local ds = date("%Y-%m-%d", g.startT)
-		if not dayMap[ds] then
-			dayMap[ds] = {}
-			table.insert(dayOrder, ds)
-		end
-		table.insert(dayMap[ds], g)
-	end
-
-	for _, ds in ipairs(dayOrder) do
-		local dgs = dayMap[ds]
-		local dayHonor = 0
-		local dayKills, dayTurnins, dayAwards = 0, 0, 0
-		local dayHK, dayHA, dayHQ = 0, 0, 0
-		local dayBGs, dayWins, dayLosses = 0, 0, 0
-		local dayFirstRankPct, dayLastRankPct = nil, nil
-		local dayFirstRankNum, dayLastRankNum = nil, nil
-
-		-- Accumulate day stats + collect rankPct snapshots
-		for _, g in ipairs(dgs) do
-			dayHonor = dayHonor + g.total
-			if g.isBG then
-				dayBGs = dayBGs + 1
-				if g.result == "win"  then dayWins   = dayWins   + 1 end
-				if g.result == "loss" then dayLosses = dayLosses + 1 end
-			end
-			for _, e in ipairs(g.entries) do
-				if e.type == "kill"   then dayKills   = dayKills   + 1; dayHK = dayHK + (e.amount or 0) end
-				if e.type == "turnin" then dayTurnins = dayTurnins + 1; dayHQ = dayHQ + (e.amount or 0) end
-				if e.type == "award"  then dayAwards  = dayAwards  + 1; dayHA = dayHA + (e.amount or 0) end
-				if e.rankPct ~= nil then
-					if not dayLastRankPct then
-						dayLastRankPct = e.rankPct
-						dayLastRankNum = e.rankNum or 0
-					end
-					dayFirstRankPct = e.rankPct
-					dayFirstRankNum = e.rankNum or 0
-				end
-			end
-		end
-
-		-- Day header line
-		local dayLine = "[" .. ds .. "] honor=" .. math.floor(dayHonor)
-		dayLine = dayLine .. " hk=" .. math.floor(dayHK) .. " ha=" .. math.floor(dayHA) .. " hq=" .. math.floor(dayHQ)
-		dayLine = dayLine .. " k=" .. dayKills .. " q=" .. dayTurnins .. " a=" .. dayAwards
-		if dayBGs > 0 then
-			dayLine = dayLine .. " bg=" .. dayBGs .. " w=" .. dayWins .. " l=" .. dayLosses
-		end
-		if dayFirstRankPct then
-			dayLine = dayLine .. " rk=" .. (dayLastRankNum or 0)
-			dayLine = dayLine .. " rpStart=" .. string.format("%.4f", dayFirstRankPct)
-			dayLine = dayLine .. " rpEnd=" .. string.format("%.4f", dayLastRankPct)
-			local gain = dayLastRankPct - dayFirstRankPct
-			if math.abs(gain) > 0.00005 then
-				dayLine = dayLine .. " rpGain=" .. string.format("%.4f", gain)
-			end
-		end
-		-- Daily BG
-		local firstT = dgs[1] and dgs[1].startT
-		if firstT then
-			local dailyBG = GetDailyBG(firstT)
-			if dailyBG then
-				dayLine = dayLine .. " daily=" .. (_ZONE_ABBR[dailyBG] or dailyBG)
-			end
-		end
-		table.insert(lines, dayLine)
-
-		-- Per-group lines (indented)
-		for _, g in ipairs(dgs) do
-			local cat = g.isBG and "bg" or (g.isTurnin and "turnin" or "world")
-			local nE = table.getn(g.entries)
-
-			-- Count entry types within group
-			local gk, gt, ga = 0, 0, 0
-			local ghk, gha, ghq = 0, 0, 0
-			local gFirstRP, gLastRP = nil, nil
-			for _, e in ipairs(g.entries) do
-				if e.type == "kill"   then gk = gk + 1; ghk = ghk + (e.amount or 0) end
-				if e.type == "turnin" then gt = gt + 1; ghq = ghq + (e.amount or 0) end
-				if e.type == "award"  then ga = ga + 1; gha = gha + (e.amount or 0) end
-				if e.rankPct ~= nil then
-					if not gLastRP then gLastRP = e.rankPct end
-					gFirstRP = e.rankPct
-				end
-			end
-
-			local gLine = "  " .. date("%H:%M", g.startT)
-			if g.lastT ~= g.startT then
-				gLine = gLine .. "-" .. date("%H:%M", g.lastT)
-			end
-			gLine = gLine .. " " .. cat .. " " .. (g.zone or "?")
-			gLine = gLine .. " h=" .. math.floor(g.total)
-			if ghk > 0 then gLine = gLine .. " hk=" .. math.floor(ghk) end
-			if gha > 0 then gLine = gLine .. " ha=" .. math.floor(gha) end
-			if ghq > 0 then gLine = gLine .. " hq=" .. math.floor(ghq) end
-			gLine = gLine .. " n=" .. nE
-			if gk > 0 then gLine = gLine .. " k=" .. gk end
-			if gt > 0 then gLine = gLine .. " q=" .. gt end
-			if ga > 0 then gLine = gLine .. " a=" .. ga end
-			if g.result then gLine = gLine .. " r=" .. g.result end
-			if gFirstRP and gLastRP then
-				gLine = gLine .. " rp=" .. string.format("%.4f", gFirstRP)
-					.. ">" .. string.format("%.4f", gLastRP)
-			end
-			table.insert(lines, gLine)
-		end
-		table.insert(lines, "")
-	end
-
-	-- Join with newlines
-	local text = ""
-	for i, ln in ipairs(lines) do
-		if i > 1 then text = text .. "\n" end
-		text = text .. ln
-	end
-	return text
-end
-
-local function ShowExportFrame()
-	if _exportFrame then
-		_exportFrame:Show()
-		return
-	end
-
-	local f = CreateFrame("Frame", "HonorHistoryExportFrame", UIParent)
-	f:SetWidth(520); f:SetHeight(400)
-	f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-	f:SetFrameStrata("DIALOG")
-	f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
-	f:SetBackdrop({
-		bgFile   = "Interface\\Buttons\\WHITE8X8",
-		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		tile = true, tileSize = 16, edgeSize = 16,
-		insets = { left = 4, right = 4, top = 4, bottom = 4 },
-	})
-	f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-	f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-	f:RegisterForDrag("LeftButton")
-	f:SetScript("OnDragStart", function() this:StartMoving() end)
-	f:SetScript("OnDragStop",  function() this:StopMovingOrSizing() end)
-
-	-- Title
-	local title = f:CreateFontString(nil, "OVERLAY")
-	title:SetFont(FONT, 12, "OUTLINE")
-	title:SetPoint("TOP", f, "TOP", 0, -8)
-	title:SetTextColor(1, 0.82, 0)
-	title:SetText("Honor History Export — Ctrl+A, Ctrl+C to copy")
-
-	-- Close button
-	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-	closeBtn:SetWidth(20); closeBtn:SetHeight(20)
-	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -4)
-	closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-	-- Scroll frame + EditBox
-	local sf = CreateFrame("ScrollFrame", "HonorHistoryExportScroll", f, "UIPanelScrollFrameTemplate")
-	sf:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -28)
-	sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 8)
-
-	local eb = CreateFrame("EditBox", "HonorHistoryExportEditBox", sf)
-	eb:SetMultiLine(true)
-	eb:SetAutoFocus(false)
-	eb:SetFont(FONT, 10)
-	eb:SetWidth(470)
-	eb:SetTextColor(0.85, 0.85, 0.85)
-	eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
-	sf:SetScrollChild(eb)
-
-	_exportFrame = f
-	f._eb = eb
-	f:Show()
-end
-
-function HonorHistory_Export()
-	ShowExportFrame()
-	local text = BuildExportText()
-	_exportFrame._eb:SetText(text)
-	_exportFrame._eb:HighlightText()
-	_exportFrame._eb:SetFocus()
 end

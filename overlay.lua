@@ -6,7 +6,7 @@ local INNER_W = 194
 -- ===== Frame =====
 local Frame = CreateFrame("Frame", "HonorSpyOverlayFrame", UIParent)
 Frame:SetWidth(210)
-Frame:SetHeight(120)
+Frame:SetHeight(132)
 Frame:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
 Frame:SetFrameStrata("HIGH")
 Frame:SetFrameLevel(10)
@@ -25,7 +25,7 @@ Frame:RegisterForDrag("LeftButton")
 Frame:SetScript("OnDragStart", function() this:StartMoving() end)
 Frame:SetScript("OnDragStop", function()
 	this:StopMovingOrSizing()
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local hs = THSE.GetDB()
 	if hs then
 		local point, _, relPoint, x, y = this:GetPoint()
 		hs.overlayPos = { point = point, relPoint = relPoint, x = x, y = y }
@@ -34,6 +34,7 @@ end)
 Frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 Frame:RegisterEvent("CHAT_MSG_COMBAT_HONOR_GAIN")
 Frame:RegisterEvent("PLAYER_PVP_RANK_CHANGED")
+Frame:RegisterEvent("UPDATE_FACTION")
 
 -- ===== Close Button =====
 local closeBtn = CreateFrame("Button", nil, Frame, "UIPanelCloseButton")
@@ -42,7 +43,7 @@ closeBtn:SetHeight(20)
 closeBtn:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -2, -2)
 closeBtn:SetScript("OnClick", function()
 	Frame:Hide()
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local hs = THSE.GetDB()
 	if hs then hs.overlayHidden = true end
 end)
 
@@ -171,7 +172,7 @@ rankTip:SetScript("OnEnter", function()
 	local gain = rankTip._sGain or "+0.00"
 	local cur  = (rankTip._pct or "?") .. "%"
 	if base then
-		GameTooltip:AddDoubleLine("Day start",  base .. "%",  0.6,0.6,0.6,  0.6,0.6,0.6)
+		GameTooltip:AddDoubleLine("Day start",  base .. "%",  0.7,0.7,0.7,  0.7,0.7,0.7)
 			GameTooltip:AddDoubleLine("+ Today", gain .. "%",  0.45,0.85,0.35,  0.45,0.85,0.35)
 			GameTooltip:AddDoubleLine("= Current", cur,  1,0.82,0,  1,0.82,0)
 		else
@@ -179,9 +180,7 @@ rankTip:SetScript("OnEnter", function()
 		GameTooltip:AddDoubleLine("= Current", cur,  1,0.82,0,  1,0.82,0)
 	end
 	GameTooltip:AddLine(" ", 1,1,1)
-		GameTooltip:AddLine("Your rank progress gained today.", 0.5, 0.5, 0.5)
-	GameTooltip:AddLine("Earning honor increases your rank %.", 0.5, 0.5, 0.5)
-	GameTooltip:AddLine("At 100% you advance to the next rank.", 0.5, 0.5, 0.5)
+		GameTooltip:AddLine("Your rank progress gained today. Earning honor increases your rank percentage. At 100% you advance to the next rank.", 0.5, 0.5, 0.5, 1)
 	GameTooltip:Show()
 end)
 rankTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -229,15 +228,87 @@ footRankTip:SetScript("OnEnter", function()
 end)
 footRankTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+-- ===== Daily BG row =====
+local footDailyLeft = Frame:CreateFontString(nil, "OVERLAY")
+footDailyLeft:SetFont("Fonts\\FRIZQT__.TTF", 9)
+footDailyLeft:SetJustifyH("LEFT")
+footDailyLeft:SetTextColor(0.5, 0.5, 0.5)
+footDailyLeft:SetPoint("TOPLEFT", Frame, "TOPLEFT", PAD, -88)
+footDailyLeft:SetText("Daily Battleground")
+
+local dailyBGIcon = Frame:CreateTexture(nil, "ARTWORK")
+dailyBGIcon:SetWidth(11)
+dailyBGIcon:SetHeight(11)
+
+local dailyBGText = Frame:CreateFontString(nil, "OVERLAY")
+dailyBGText:SetFont("Fonts\\FRIZQT__.TTF", 9)
+dailyBGText:SetJustifyH("RIGHT")
+dailyBGText:SetTextColor(0.87, 0.73, 0.27)
+dailyBGText:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -88)
+
+dailyBGIcon:SetPoint("RIGHT", dailyBGText, "LEFT", -3, 0)
+
+local dailyBGTip = CreateFrame("Frame", nil, Frame)
+dailyBGTip:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD,  -86)
+dailyBGTip:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -86)
+dailyBGTip:SetHeight(14)
+dailyBGTip:EnableMouse(true)
+dailyBGTip:SetFrameLevel(Frame:GetFrameLevel() + 5)
+local _BG_COLORS = {
+	["Warsong Gulch"]  = { 1.0, 0.5, 0.5 },    -- red
+	["Arathi Basin"]   = { 1.0, 1.0, 0.5 },     -- yellow
+	["Blood Ring"]     = { 1.0, 0.82, 0.3 },    -- gold
+	["Thorn Gorge"]    = { 0.5, 1.0, 0.5 },     -- green
+	["Alterac Valley"] = { 0.5, 0.7, 1.0 },     -- blue
+}
+dailyBGTip:SetScript("OnEnter", function()
+	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMLEFT")
+	GameTooltip:ClearLines()
+	GameTooltip:AddLine("Daily Battleground", 1, 0.82, 0)
+	local now = time()
+	local today = THSE.GetDailyBG(now)
+	if today then
+		local c = _BG_COLORS[today] or { 1, 1, 1 }
+		GameTooltip:AddLine("Daily Battleground yield extra honor and reputation and rotate throughout the week in a specific order.", 0.7, 0.7, 0.7, 1)
+		GameTooltip:AddLine(" ", 1, 1, 1)
+		GameTooltip:AddDoubleLine("Today", today, 1, 0.82, 0, c[1], c[2], c[3])
+		for d = 1, 6 do
+			local future = THSE.GetDailyBG(now + d * 86400)
+			if future then
+				local dayName = date("%A", now + d * 86400)
+				local fc = _BG_COLORS[future] or { 0.7, 0.7, 0.7 }
+				GameTooltip:AddDoubleLine(dayName, future, 0.5, 0.5, 0.5, fc[1], fc[2], fc[3])
+			end
+		end
+	end
+	GameTooltip:Show()
+end)
+dailyBGTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+local function UpdateDailyBG()
+	local bg = THSE.GetDailyBG(time())
+	if bg then
+		dailyBGIcon:SetTexture(THSE.BG_MARK_ICON[bg] or "Interface\\Icons\\INV_Misc_QuestionMark")
+		dailyBGText:SetText(bg)
+		dailyBGIcon:Show()
+		dailyBGText:Show()
+		footDailyLeft:Show()
+	else
+		dailyBGIcon:Hide()
+		dailyBGText:Hide()
+		footDailyLeft:Hide()
+	end
+end
+
 -- ===== Bottom action buttons =====
 local btnDiv = Frame:CreateTexture(nil, "ARTWORK")
 btnDiv:SetTexture(1, 1, 1, 0.12)
 btnDiv:SetHeight(1)
-btnDiv:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD, -92)
-btnDiv:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -92)
+btnDiv:SetPoint("TOPLEFT",  Frame, "TOPLEFT",  PAD, -102)
+btnDiv:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -102)
 
 local BTN_H  = 20
-local BTN_Y  = -95
+local BTN_Y  = -105
 local BTN_W  = INNER_W
 
 local function MakeActionBtn(label, leftOffset, onClick, tipTitle, tipText)
@@ -289,7 +360,8 @@ local function MakeActionBtn(label, leftOffset, onClick, tipTitle, tipText)
 	return btn
 end
 
-MakeActionBtn("History", PAD, function() if HonorHistory_Open then HonorHistory_Open() end end, "Honor History", "View a full log of your honor sources,\nbattleground results and rank progression.")
+local historyBtn = MakeActionBtn("History", PAD, function() THSE:HistoryOpen() end, "Honor History", "View a full log of your honor sources,\nbattleground results and rank progression.")
+
 local honorLabel = Frame:CreateFontString(nil, "OVERLAY")
 honorLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
 honorLabel:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", -PAD, -28)
@@ -391,7 +463,17 @@ local function UpdateOverlay()
 
 	local progress = GetPVPRankProgress() or 0
 	local pct = string.format("%.2f", progress * 100)
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local hs = THSE.GetDB()
+
+	-- If progress dropped below baseline (weekly decay applied after login), reset baselines
+	if progress > 0.0001 and dayStartProgress and progress < dayStartProgress - 0.001 then
+		dayStartProgress = progress
+		if hs then hs.dayStartProgress = progress end
+	end
+	if progress > 0.0001 and weeklyStartProgress and progress < weeklyStartProgress - 0.001 then
+		weeklyStartProgress = progress
+		if hs then hs.weeklyStartProgress = progress end
+	end
 
 	-- Today's gain % for the progress bar
 	local sGain = 0
@@ -435,7 +517,7 @@ local function UpdateOverlay()
 	honorTip._honor = weekHonor
 	-- Today's honor from honorHistory
 	local todayTotal = 0
-	local hhs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+	local hhs = THSE.GetDB()
 	if hhs and hhs.honorHistory then
 		local todayKey = date("%a %d %b", time())
 		for _, e in ipairs(hhs.honorHistory) do
@@ -456,9 +538,9 @@ local function UpdateOverlay()
 	end
 
 	footRankRight:SetText(sGainStr .. "%")
-end
 
--- ===== Event Handler =====
+	UpdateDailyBG()
+end
 local pendingRefresh = 0
 
 Frame:SetScript("OnEvent", function()
@@ -472,7 +554,7 @@ Frame:SetScript("OnEvent", function()
 			curHonor = h or 0
 		end
 		sessionStartHonor = curHonor
-		local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+		local hs = THSE.GetDB()
 		if hs then
 			-- Day-start progress: persist per calendar day so /reload keeps the baseline
 			local todayKey = date("%Y-%m-%d", time())
@@ -491,6 +573,7 @@ Frame:SetScript("OnEvent", function()
 				hs.sessionStartHonor = curHonor
 			end
 			weeklyStartProgress = hs.weeklyStartProgress or curProgress
+			Frame:SetHeight(132)
 			local pos = hs.overlayPos
 			if pos then
 				Frame:ClearAllPoints()
@@ -507,7 +590,8 @@ Frame:SetScript("OnEvent", function()
 			Frame:Show()
 		end
 		UpdateOverlay()
-	elseif event == "CHAT_MSG_COMBAT_HONOR_GAIN" or event == "PLAYER_PVP_RANK_CHANGED" then
+	elseif event == "CHAT_MSG_COMBAT_HONOR_GAIN" or event == "PLAYER_PVP_RANK_CHANGED"
+		or event == "UPDATE_FACTION" then
 		pendingRefresh = 1.5
 	end
 end)
@@ -532,8 +616,8 @@ Frame:SetScript("OnUpdate", function()
 end)
 
 -- ===== Public API =====
-function HonorSpyOverlay_Toggle()
-	local hs = HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
+function THSE:OverlayToggle()
+	local hs = THSE.GetDB()
 	if Frame:IsVisible() then
 		Frame:Hide()
 		if hs then hs.overlayHidden = true end
@@ -544,6 +628,6 @@ function HonorSpyOverlay_Toggle()
 	end
 end
 
-function HonorSpyOverlay_Refresh()
+function THSE:OverlayRefresh()
 	if Frame:IsVisible() then UpdateOverlay() end
 end

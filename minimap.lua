@@ -5,9 +5,7 @@ local MINIMAP_ICON = "Interface\\Icons\\Inv_Misc_Bomb_04"
 local minimapButton
 local minimapAngle = 200
 
-local function GetDB()
-	return HonorSpy and HonorSpy.db and HonorSpy.db.realm and HonorSpy.db.realm.hs
-end
+local GetDB = THSE.GetDB
 
 local function UpdateMinimapButtonPosition()
 	if not minimapButton then return end
@@ -47,9 +45,9 @@ local function CreateMinimapButton()
 
 	minimapButton:SetScript("OnClick", function()
 		if arg1 == "RightButton" then
-			if HonorHistory_Open then HonorHistory_Open() end
+			THSE:HistoryOpen()
 		else
-			if HonorSpyOverlay_Toggle then HonorSpyOverlay_Toggle() end
+			THSE:OverlayToggle()
 		end
 	end)
 
@@ -87,7 +85,7 @@ local function CreateMinimapButton()
 end
 
 -- ===== Show/Hide toggle =====
-function HonorSpyMinimap_Toggle()
+function THSE:MinimapToggle()
 	if not minimapButton then return end
 	if minimapButton:IsVisible() then
 		minimapButton:Hide()
