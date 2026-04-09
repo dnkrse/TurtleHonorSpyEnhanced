@@ -572,9 +572,7 @@ Frame:SetScript("OnEvent", function()
 			end
 			dayStartProgress = hs.dayStartProgress or curProgress
 			local lastReset = GetLastWedResetUTC()
-			-- Back-fill last week's honor from API if continuous snapshot missed it
-			-- Runs every login (guarded by key-existence check) so it catches the
-			-- window where GetPVPLastWeekStats still returns last week's data.
+			-- Back-fill last week's honor from API (safety net for continuous snapshot)
 			if not hs.weekApiHonor then hs.weekApiHonor = {} end
 			local prevResetKey = tostring(lastReset - 604800)
 			if not hs.weekApiHonor[prevResetKey] then
