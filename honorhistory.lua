@@ -1351,6 +1351,8 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				P.icon[ei]:ClearAllPoints()
 				P.icon[ei]:SetTexture(compactIcon)
 				P.icon[ei]:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+				P.icon[ei]:SetDesaturated(nil)
+				P.icon[ei]:SetVertexColor(1, 1, 1)
 				P.icon[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 28, -yOff)
 				P.icon[ei]:Show()
 				P.name[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 46, -yOff - 1)
@@ -1358,6 +1360,8 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 				P.icon[ei]:ClearAllPoints()
 				P.icon[ei]:SetTexture(_BG_MARK_ICON["Warsong Gulch"])
 				P.icon[ei]:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+				P.icon[ei]:SetDesaturated(nil)
+				P.icon[ei]:SetVertexColor(1, 1, 1)
 				P.icon[ei]:SetPoint("TOPLEFT", content, "TOPLEFT", 13, -yOff)
 				P.icon[ei]:Show()
 				P.icon2[ei]:ClearAllPoints()
@@ -1374,8 +1378,10 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 			else
 				local iconTex = nil
 				local iconGrey = false
+				local iconTint = nil  -- {r,g,b} override for vertex color
 				if e.type == "tick" then
-					iconTex = "Interface\\Icons\\Spell_Holy_MindVision"
+					iconTex = "Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Up"
+					iconTint = {0, 1, 0}
 				elseif e.type == "award" or e.type == "turnin" then
 					iconTex = _BG_MARK_ICON[e.zone]
 						or _BG_MARK_ICON[QuestToBG(e.questName) or ""]
@@ -1399,6 +1405,9 @@ local function RenderEntries(entries, yOff, cr, cg_c, cb, amtOffset, hideZero)
 					if iconGrey then
 						P.icon[ei]:SetDesaturated(1)
 						P.icon[ei]:SetVertexColor(0.6, 0.6, 0.6)
+					elseif iconTint then
+						P.icon[ei]:SetDesaturated(nil)
+						P.icon[ei]:SetVertexColor(iconTint[1], iconTint[2], iconTint[3])
 					else
 						P.icon[ei]:SetDesaturated(nil)
 						P.icon[ei]:SetVertexColor(1, 1, 1)
