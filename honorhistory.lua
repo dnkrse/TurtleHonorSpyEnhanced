@@ -490,7 +490,7 @@ local function BuildGroupTip(g)
 	return tip
 end
 
-local function BuildWeekTip(label, weekGroups, wTop, wBot, apiHonor)
+local function BuildWeekTip(label, weekGroups, wTop, wBot, apiHonor, decayPct)
 	local tip = { title = label, tr = 1.0, tg = 0.82, tb = 0.0, lines = {} }
 	local L = tip.lines
 
@@ -571,14 +571,27 @@ local function BuildWeekTip(label, weekGroups, wTop, wBot, apiHonor)
 	end
 
 	-- Rank Progress section
-	if wTop and wBot then
-		local wGain = wTop - wBot
-		if wGain > 0.00005 then
-			AppendRankGainTip(L, wGain, displayTotal, hKills, hBG + hTurnin + hBonus)
-		elseif wGain < -0.00005 then
+	local hasRankSection = (wTop and wBot) or (decayPct and decayPct > 0.001)
+	if hasRankSection then
+		local rankGain = nil
+		if wTop and wBot then
+			local wGain = wTop - wBot
+			if wGain > 0.00005 then
+				AppendRankGainTip(L, wGain, displayTotal, hKills, hBG + hTurnin + hBonus)
+				rankGain = wGain
+			elseif wGain < -0.00005 then
+				table.insert(L, { "", nil })
+				table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
+				table.insert(L, { "Net Change", string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
+			end
+		end
+		if not rankGain and decayPct and decayPct > 0.001 then
 			table.insert(L, { "", nil })
 			table.insert(L, { "Rank Progress", nil, 1.0, 0.82, 0.0 })
-			table.insert(L, { "Net Change", string.format("%.2f", wGain * 100) .. "%", 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
+		end
+		if decayPct and decayPct > 0.001 then
+			local lostStr = "-" .. string.format("%.2f", decayPct * 100) .. "%"
+			table.insert(L, { "Decay", lostStr, 0.7, 0.7, 0.7, 1.0, 0.30, 0.30 })
 		end
 	end
 
@@ -1905,7 +1918,12 @@ local function RefreshList()
 				local snapKey = tostring(_thisResetT - weeksAgo * 604800)
 				wApiHonor = hs and hs.weekApiHonor and hs.weekApiHonor[snapKey]
 			end
-			wsep._tip = BuildWeekTip(WeekLabel(weeksAgo, _thisResetT), weekGroups, wTop, wBot, wApiHonor)
+			local wDecayPct = nil
+			local prevWTop = _weekTopRankPct[weeksAgo + 1]
+			if prevWTop and wBot and (prevWTop - wBot > 0.001) then
+				wDecayPct = prevWTop - wBot
+			end
+			wsep._tip = BuildWeekTip(WeekLabel(weeksAgo, _thisResetT), weekGroups, wTop, wBot, wApiHonor, wDecayPct)
 			wsep:SetScript("OnEnter", function() ShowGroupTip(this, this._tip) end)
 			wsep:SetScript("OnLeave", function() GameTooltip:Hide() end)
 			wsep:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -yOff)

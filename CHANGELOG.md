@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.2
+
+**Features:**
+- 4-state compact mode: normal, compact, merged, super compact
+- Merged mode: consecutive kills/bonus/quests collapsed into summary rows
+- `/hs export`: copy-paste window with compact honor/rank data dump
+- Daily BG display: icon on day header, name in tooltip, `daily=` in export
+- Green scroll-up arrow icon for rank progression entries
+
+**Fixes:**
+- Weekly reset issues: decay bar, day-split, negative ticks, expand button
+- `GetPVPLastWeekStats` return value order; backfill on every login
+- Daily BG cycle: slot 3 cleared (Sunnyglade disabled, future Thorn Gorge)
+
 ## v2.1.1
 
 **Features:**
